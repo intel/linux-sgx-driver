@@ -310,7 +310,7 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	struct isgx_secs *secs = NULL;
 	struct isgx_epc_page *secs_epc_page;
 	void *secs_vaddr = NULL;
-	unsigned long backing;
+	struct file *backing;
 	long ret;
 
 	secs = kzalloc(sizeof(*secs),  GFP_KERNEL);
@@ -339,9 +339,9 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 		return PTR_ERR((void *) (unsigned long) secs->base);
 	}
 
-	backing = vm_mmap(NULL, 0, secs->size + PAGE_SIZE,
-			  PROT_READ | PROT_WRITE,
-			  MAP_PRIVATE, 0);
+	backing = shmem_file_setup("Intel SGX backing storage",
+				   secs->size + PAGE_SIZE,
+				   VM_NORESERVE);
 	if (IS_ERR((void *) backing)) {
 		ret = PTR_ERR((void *) backing);
 		vm_munmap(secs->base, secs->size);
@@ -420,7 +420,6 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 out:
 	if (ret) {
 		vm_munmap(secs->base, secs->size);
-		vm_munmap(backing, secs->size + PAGE_SIZE);
 		if (enclave)
 			kref_put(&enclave->refcount, isgx_enclave_release);
 	} else
@@ -731,7 +730,6 @@ static long isgx_ioctl_enclave_destroy(struct file *filep, unsigned int cmd,
 		return ret;
 
 	vm_munmap(enclave->base, enclave->size);
-	vm_munmap(enclave->backing, enclave->size + PAGE_SIZE);
 
 	kref_put(&enclave->refcount, isgx_enclave_release);
 	return 0;

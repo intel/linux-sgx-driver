@@ -118,7 +118,7 @@ struct isgx_enclave {
 	unsigned int			flags;
 	struct task_struct		*owner;
 	struct mm_struct		*mm;
-	unsigned long			backing;
+	struct file			*backing;
 	struct list_head		vma_list;
 	struct list_head		load_list;
 	struct kref			refcount;

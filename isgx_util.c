@@ -94,37 +94,28 @@ struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 				   struct isgx_enclave_page* entry,
 				   bool write)
 {
-	struct page *user_page;
-	unsigned long backing_addr;
-	int ret;
+	struct page *backing;
+	struct inode *inode;
+	struct address_space *mapping;
+	gfp_t gfpmask;
+	pgoff_t index;
 
-	backing_addr = enclave->backing + entry->addr - enclave->base;
+	inode = enclave->backing->f_path.dentry->d_inode;
+	mapping = inode->i_mapping;
+	gfpmask = mapping_gfp_mask(mapping);
 
-	ret = get_user_pages(enclave->owner,
-			     enclave->mm,
-			     backing_addr,
-			     1, /* nr_pages */
-			     write, /* write */
-			     0, /* force */
-			     &user_page,
-			     NULL);
-	if (ret < 0) {
-		isgx_dbg(enclave,
-			 "get_user_pages() for the backing 0x%lx "\
-			 "returned %d\n",
-			 entry->addr, ret);
-		return ERR_PTR(ret);
-	}
-
-	return user_page;
+	index = (entry->addr - enclave->base) >> PAGE_SHIFT;
+	backing = shmem_read_mapping_page_gfp(mapping, index, gfpmask);
+	return backing;
 }
 
 void isgx_put_backing_page(struct page *backing_page, bool write)
 {
+
 	if (write)
 		set_page_dirty(backing_page);
 
-	put_page(backing_page);
+	page_cache_release(backing_page);
 }
 
 void isgx_insert_pte(struct isgx_enclave *enclave,
@@ -413,5 +404,9 @@ void isgx_enclave_release(struct kref *ref)
 
 	if (enclave->tgid_ctx)
 		kref_put(&enclave->tgid_ctx->refcount, release_tgid_ctx);
+
+	if (enclave->backing)
+		fput(enclave->backing);
+
 	kfree(enclave);
 }
