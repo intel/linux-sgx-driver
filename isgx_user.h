@@ -23,13 +23,11 @@
 #define SGX_MAGIC 0xA4
 
 #define SGX_IOC_ENCLAVE_CREATE \
-	_IOWR(SGX_MAGIC, 0x00, struct sgx_enclave_create)
+	_IOW(SGX_MAGIC, 0x00, struct sgx_enclave_create)
 #define SGX_IOC_ENCLAVE_ADD_PAGE \
 	_IOW(SGX_MAGIC, 0x01, struct sgx_enclave_add_page)
 #define SGX_IOC_ENCLAVE_INIT \
 	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init)
-#define SGX_IOC_ENCLAVE_DESTROY \
-	_IOW(SGX_MAGIC, 0x03, struct sgx_enclave_destroy)
 
 /* SGX leaf instruction return values */
 #define SGX_SUCCESS			0
@@ -62,7 +60,6 @@
 
 struct sgx_enclave_create  {
 	__u64	src;
-	__u64	addr;
 } __attribute__((packed));
 
 #define SGX_ADD_SKIP_EEXTEND 0x1
@@ -78,10 +75,6 @@ struct sgx_enclave_init {
 	__u64	addr;
 	__u64	sigstruct;
 	__u64	einittoken;
-} __attribute__((packed));
-
-struct sgx_enclave_destroy {
-	__u64	addr;
 } __attribute__((packed));
 
 #endif /* _UAPI_ASM_X86_SGX_H */
