@@ -186,7 +186,7 @@ static int do_ewb(struct isgx_enclave *enclave,
 	isgx_put_epc_page(epc);
 	kunmap_atomic((void *) pginfo.srcpge);
 
-	if (ret != 0 && ret != ISGX_NOT_TRACKED)
+	if (ret != 0 && ret != SGX_NOT_TRACKED)
 		isgx_err(enclave, "EWB returned %d\n", ret);
 
 	return ret;
@@ -275,7 +275,7 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 		evma = isgx_find_vma(enclave, entry->addr);
 		if (evma) {
 			ret = do_ewb(enclave, entry, pages[i]);
-			BUG_ON(ret != 0 && ret != ISGX_NOT_TRACKED);
+			BUG_ON(ret != 0 && ret != SGX_NOT_TRACKED);
 			/* Only kick out threads with an IPI if needed. */
 			if (ret) {
 				smp_call_function(isgx_ipi_cb, NULL, 1);

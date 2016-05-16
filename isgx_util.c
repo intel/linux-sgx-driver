@@ -338,7 +338,7 @@ int isgx_find_enclave(struct mm_struct *mm, unsigned long addr,
 
 	if (enclave->flags & ISGX_ENCLAVE_SUSPEND) {
 		isgx_info(enclave,  "suspend ID has been changed");
-		return ISGX_POWER_LOST_ENCLAVE;
+		return SGX_POWER_LOST_ENCLAVE;
 	}
 
 	return 0;

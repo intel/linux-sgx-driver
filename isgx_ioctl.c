@@ -303,9 +303,9 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 {
 	struct page_info pginfo;
 	struct isgx_secinfo secinfo;
-	struct isgx_create_param *createp =
-		(struct isgx_create_param *) arg;
-	void *secs_la = createp->secs;
+	struct sgx_enclave_create *createp =
+		(struct sgx_enclave_create *) arg;
+	void *secs_la = (void *)createp->src;
 	struct isgx_enclave *enclave = NULL;
 	struct isgx_secs *secs = NULL;
 	struct isgx_epc_page *secs_epc_page;
@@ -437,8 +437,9 @@ static int validate_secinfo(struct isgx_secinfo *secinfo)
 	int i;
 
 	if ((secinfo->flags & ISGX_SECINFO_RESERVED_MASK) ||
-	    ((perm & ISGX_SECINFO_W) && !(perm & ISGX_SECINFO_R)) ||
-	    (page_type != ISGX_SECINFO_TCS && page_type != ISGX_SECINFO_REG))
+	    ((perm & SGX_SECINFO_W) && !(perm & SGX_SECINFO_R)) ||
+	    (page_type != SGX_SECINFO_TCS &&
+	     page_type != SGX_SECINFO_REG))
 		return -EINVAL;
 
 	for (i = 0; i < sizeof(secinfo->reserved) / sizeof(u64); i++)
@@ -470,7 +471,7 @@ static int validate_tcs(struct isgx_tcs *tcs)
 
 static int __enclave_add_page(struct isgx_enclave *enclave,
 			      struct isgx_enclave_page *enclave_page,
-			      struct isgx_add_param *addp,
+			      struct sgx_enclave_add_page *addp,
 			      struct isgx_secinfo *secinfo)
 {
 	u64 page_type = secinfo->flags & ISGX_SECINFO_PAGE_TYPE_MASK;
@@ -488,8 +489,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 		return -ENOMEM;
 
 	tmp_vaddr = kmap(tmp_page);
-	ret = copy_from_user((void *) tmp_vaddr, (void *) addp->user_addr,
-			     PAGE_SIZE);
+	ret = copy_from_user((void *)tmp_vaddr, (void *)addp->src, PAGE_SIZE);
 	kunmap(tmp_page);
 	if (ret) {
 		__free_page(tmp_page);
@@ -501,7 +501,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 		return -EINVAL;
 	}
 
-	if (page_type == ISGX_SECINFO_TCS) {
+	if (page_type == SGX_SECINFO_TCS) {
 		tcs = (struct isgx_tcs *) kmap(tmp_page);
 		ret = validate_tcs(tcs);
 		kunmap(tmp_page);
@@ -547,7 +547,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 	kunmap(backing_page);
 	kunmap(tmp_page);
 
-	if (page_type == ISGX_SECINFO_TCS)
+	if (page_type == SGX_SECINFO_TCS)
 		enclave_page->flags |= ISGX_ENCLAVE_PAGE_TCS;
 
 	memcpy(&req->secinfo, secinfo, sizeof(*secinfo));
@@ -579,13 +579,13 @@ out:
 static long isgx_ioctl_enclave_add_page(struct file *filep, unsigned int cmd,
 					unsigned long arg)
 {
-	struct isgx_add_param *addp;
+	struct sgx_enclave_add_page *addp;
 	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *page;
 	struct isgx_secinfo secinfo;
 	int ret;
 
-	addp = (struct isgx_add_param *) arg;
+	addp = (struct sgx_enclave_add_page *) arg;
 
 	if (addp->addr & (PAGE_SIZE - 1))
 		return -EINVAL;
@@ -623,13 +623,13 @@ static int __isgx_enclave_init(struct isgx_enclave *enclave,
 			       char *sigstruct,
 			       struct isgx_einittoken *einittoken)
 {
-	int ret = ISGX_UNMASKED_EVENT;
+	int ret = SGX_UNMASKED_EVENT;
 	void *secs_va = NULL;
 	int i;
 	int j;
 
 	if (einittoken->valid && einittoken->isvsvnle < isgx_isvsvnle_min)
-		return ISGX_LE_ROLLBACK;
+		return SGX_LE_ROLLBACK;
 
 	for (i = 0; i < EINIT_TRY_COUNT; i++) {
 		for (j = 0; j < EINIT_SPIN_COUNT; j++) {
@@ -638,13 +638,13 @@ static int __isgx_enclave_init(struct isgx_enclave *enclave,
 			ret = __einit(sigstruct, einittoken, secs_va);
 			isgx_put_epc_page(secs_va);
 			mutex_unlock(&enclave->lock);
-			if (ret == ISGX_UNMASKED_EVENT)
+			if (ret == SGX_UNMASKED_EVENT)
 				continue;
 			else
 				break;
 		}
 
-		if (ret != ISGX_UNMASKED_EVENT)
+		if (ret != SGX_UNMASKED_EVENT)
 			goto out;
 
 		msleep_interruptible(EINIT_BACKOFF_TIME);
@@ -669,7 +669,7 @@ static long isgx_ioctl_enclave_init(struct file *filep, unsigned int cmd,
 				    unsigned long arg)
 {
 	int ret = -EINVAL;
-	struct isgx_init_param *initp = (struct isgx_init_param *) arg;
+	struct sgx_enclave_init *initp = (struct sgx_enclave_init *) arg;
 	unsigned long enclave_id = initp->addr;
 	char *sigstruct;
 	struct isgx_einittoken *einittoken;
@@ -684,11 +684,13 @@ static long isgx_ioctl_enclave_init(struct file *filep, unsigned int cmd,
 	einittoken = (struct isgx_einittoken *)
 		((unsigned long) sigstruct + PAGE_SIZE / 2);
 
-	ret = copy_from_user(sigstruct, initp->sigstruct, SIGSTRUCT_SIZE);
+	ret = copy_from_user(sigstruct, (void *)initp->sigstruct,
+			     SIGSTRUCT_SIZE);
 	if (ret)
 		goto out_free_page;
 
-	ret = copy_from_user(einittoken, initp->einittoken, EINITTOKEN_SIZE);
+	ret = copy_from_user(einittoken, (void *)initp->einittoken,
+			     EINITTOKEN_SIZE);
 	if (ret)
 		goto out_free_page;
 
@@ -718,8 +720,8 @@ out_free_page:
 static long isgx_ioctl_enclave_destroy(struct file *filep, unsigned int cmd,
 				       unsigned long arg)
 {
-	struct isgx_destroy_param *destroyp =
-		(struct isgx_destroy_param *) arg;
+	struct sgx_enclave_destroy *destroyp =
+		(struct sgx_enclave_destroy *) arg;
 	unsigned long enclave_id = destroyp->addr;
 	struct isgx_enclave *enclave;
 	int ret;
@@ -745,16 +747,16 @@ long isgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	long ret;
 
 	switch (cmd) {
-	case ISGX_IOCTL_ENCLAVE_CREATE:
+	case SGX_IOC_ENCLAVE_CREATE:
 		handler = isgx_ioctl_enclave_create;
 		break;
-	case ISGX_IOCTL_ENCLAVE_ADD_PAGE:
+	case SGX_IOC_ENCLAVE_ADD_PAGE:
 		handler = isgx_ioctl_enclave_add_page;
 		break;
-	case ISGX_IOCTL_ENCLAVE_INIT:
+	case SGX_IOC_ENCLAVE_INIT:
 		handler = isgx_ioctl_enclave_init;
 		break;
-	case ISGX_IOCTL_ENCLAVE_DESTROY:
+	case SGX_IOC_ENCLAVE_DESTROY:
 		handler = isgx_ioctl_enclave_destroy;
 		break;
 	default:
@@ -870,7 +872,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 
 	enclave->secs_child_cnt++;
 
-	if (!(flags & ISGX_ADD_SKIP_EEXTEND)) {
+	if (!(flags & SGX_ADD_SKIP_EEXTEND)) {
 		ret = do_eextend(enclave->secs_page.epc_page, epc_page);
 		if (ret) {
 			isgx_dbg(enclave, "EEXTEND returned %d\n", ret);
