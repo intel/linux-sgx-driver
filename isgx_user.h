@@ -57,8 +57,8 @@
 #define SGX_INVALID_KEYNAME		256
 
 /* IOCTL return values */
-#define SGX_POWER_LOST_ENCLAVE		0xc0000002
-#define SGX_LE_ROLLBACK			0xc0000003
+#define SGX_POWER_LOST_ENCLAVE		0x40000000
+#define SGX_LE_ROLLBACK			0x40000001
 
 struct sgx_enclave_create  {
 	__u64	src;
