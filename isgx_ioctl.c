@@ -28,7 +28,7 @@ struct isgx_add_page_req {
 	struct list_head list;
 	struct isgx_enclave_page *enclave_page;
 	struct isgx_secinfo secinfo;
-	u64 flags;
+	u16 mrmask;
 };
 
 static u16 isgx_isvsvnle_min = 0;
@@ -522,7 +522,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 	memcpy(&req->secinfo, secinfo, sizeof(*secinfo));
 
 	req->enclave_page = enclave_page;
-	req->flags = addp->flags;
+	req->mrmask = addp->mrmask;
 	empty = list_empty(&enclave->add_page_reqs);
 	kref_get(&enclave->refcount);
 	list_add_tail(&req->list, &enclave->add_page_reqs);
@@ -747,19 +747,23 @@ static int do_eadd(struct isgx_epc_page *secs_page,
 	return ret;
 }
 
-static int do_eextend(struct isgx_epc_page *secs_page,
-		      struct isgx_epc_page *epc_page)
+static int sgx_measure_page(struct isgx_epc_page *secs_page,
+			    struct isgx_epc_page *epc_page,
+			    u16 mrmask)
 {
 	void *secs;
 	void *epc;
 	int ret = 0;
-	int i;
+	int i, j;
 
-	for (i = 0; i < 0x1000 && !ret; i += 0x100) {
+	for (i = 0, j = 1; i < 0x1000 && !ret; i += 0x100, j <<= 1) {
+		if (!(j & mrmask))
+			continue;
+
 		secs = isgx_get_epc_page(secs_page);
 		epc = isgx_get_epc_page(epc_page);
 
-		ret = __eextend(secs, (void *)((unsigned long) epc + i));
+		ret = __eextend(secs, (void *)((unsigned long)epc + i));
 
 		isgx_put_epc_page(epc);
 		isgx_put_epc_page(secs);
@@ -773,7 +777,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	struct page *backing_page;
 	struct isgx_epc_page *epc_page;
 	struct isgx_enclave_page *enclave_page = req->enclave_page;
-	unsigned int flags = req->flags;
+	unsigned int mrmask = req->mrmask;
 	struct isgx_enclave *enclave = enclave_page->enclave;
 	unsigned free_flags = 0;
 	struct vm_area_struct *vma;
@@ -818,12 +822,10 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 
 	enclave->secs_child_cnt++;
 
-	if (!(flags & SGX_ADD_SKIP_EEXTEND)) {
-		ret = do_eextend(enclave->secs_page.epc_page, epc_page);
-		if (ret) {
-			isgx_dbg(enclave, "EEXTEND returned %d\n", ret);
-			goto out;
-		}
+	ret = sgx_measure_page(enclave->secs_page.epc_page, epc_page, mrmask);
+	if (ret) {
+		isgx_dbg(enclave, "EEXTEND returned %d\n", ret);
+		goto out;
 	}
 
 	isgx_test_and_clear_young(enclave_page);

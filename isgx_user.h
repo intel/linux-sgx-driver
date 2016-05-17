@@ -62,13 +62,11 @@ struct sgx_enclave_create  {
 	__u64	src;
 } __attribute__((packed));
 
-#define SGX_ADD_SKIP_EEXTEND 0x1
-
 struct sgx_enclave_add_page {
 	__u64	addr;
 	__u64	src;
 	__u64	secinfo;
-	__u64	flags;
+	__u16	mrmask;
 } __attribute__((packed));
 
 struct sgx_enclave_init {
