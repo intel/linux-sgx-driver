@@ -20,14 +20,16 @@
 #include <linux/types.h>
 #include <linux/ioctl.h>
 
+#define SGX_MAGIC 0xA4
+
 #define SGX_IOC_ENCLAVE_CREATE \
-	_IOWR('p', 0x02, struct sgx_enclave_create)
+	_IOWR(SGX_MAGIC, 0x00, struct sgx_enclave_create)
 #define SGX_IOC_ENCLAVE_ADD_PAGE \
-	_IOW('p', 0x03, struct sgx_enclave_add_page)
+	_IOW(SGX_MAGIC, 0x01, struct sgx_enclave_add_page)
 #define SGX_IOC_ENCLAVE_INIT \
-	_IOW('p', 0x04, struct sgx_enclave_init)
+	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init)
 #define SGX_IOC_ENCLAVE_DESTROY \
-	_IOW('p', 0x06, struct sgx_enclave_destroy)
+	_IOW(SGX_MAGIC, 0x03, struct sgx_enclave_destroy)
 
 /* SGX leaf instruction return values */
 #define SGX_SUCCESS			0
