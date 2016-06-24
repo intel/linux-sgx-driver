@@ -26,33 +26,35 @@ Build and Install the Intel(R) SGX Driver
 -----------------------------------------
 
 ###Prerequisites
-- Ensure that you have the following required operating systems:
+- Ensure that you have the following required operating systems:  
   Ubuntu\*-14.04-LTS 64bits
-- Ensure that you have the following required hardware:
+- Ensure that you have the following required hardware:  
   6th Generation Intel(R) Core(TM) Processor (code named Skylake)
 - Configure the system with the **SGX hardware enabled** option.
 
 ###Build the Intel(R) SGX Driver
 To build Intel SGX driver, change the directory to the driver path and enter the following command:
-    `$ make`
-    You can find the driver *isgx.ko* generated in the same directory.
+```
+$ make
+```
+You can find the driver *isgx.ko* generated in the same directory.
 
 ###Install the Intel(R) SGX Driver
 To install the Intel SGX driver, enter the following commands: 
 ```
-    $ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
-    $ sudo cp isgx.ko "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
-    $ sudo sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"
-    $ sudo /sbin/depmod
-    $ sudo /sbin/modprobe isgx
+$ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
+$ sudo cp isgx.ko "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
+$ sudo sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"
+$ sudo /sbin/depmod
+$ sudo /sbin/modprobe isgx
 ```
 
 ###Uninstall the Intel(R) SGX Driver
-Before uninstall the Intel SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.
+Before uninstall the Intel SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
 To uninstall the Intel SGX driver, enter the following commands: 
 ```
-    $ sudo /sbin/modprobe -r isgx
-    $ sudo rm -rf "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
-    $ sudo /sbin/depmod
-    $ sudo /bin/sed -i '/^isgx$/d' /etc/modules
+$ sudo /sbin/modprobe -r isgx
+$ sudo rm -rf "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
+$ sudo /sbin/depmod
+$ sudo /bin/sed -i '/^isgx$/d' /etc/modules
 ```
