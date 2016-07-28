@@ -15,6 +15,10 @@ License
 -------
 See License.txt for details.
 
+Contributing
+-------
+See CONTRIBUTING.md for details.
+
 Documentation
 -------------
 - [Intel(R) SGX for Linux\* OS][1] project home page on [01.org](http://01.org)
@@ -27,7 +31,7 @@ Build and Install the Intel(R) SGX Driver
 
 ###Prerequisites
 - Ensure that you have the following required operating systems:  
-  Ubuntu\*-14.04-LTS 64bits
+  Ubuntu\* Desktop-14.04-LTS 64bits
 - Ensure that you have the following required hardware:  
   6th Generation Intel(R) Core(TM) Processor (code named Skylake)
 - Configure the system with the **SGX hardware enabled** option.
