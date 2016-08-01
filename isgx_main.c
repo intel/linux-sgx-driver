@@ -159,9 +159,9 @@ static int isgx_init_platform(void)
 	cpuid_count(SGX_CPUID, 0x0, &eax, &ebx, &ecx, &edx);
 	if (edx & 0xFFFF) {
 #ifdef CONFIG_X86_64
-		isgx_enclave_size_max_64 = 2ULL << (edx & 0xFF);
+		isgx_enclave_size_max_64 = 1ULL << ((edx >> 8) & 0xFF);
 #endif
-		isgx_enclave_size_max_32 = 2ULL << ((edx >> 8) & 0xFF);
+		isgx_enclave_size_max_32 = 1ULL << (edx & 0xFF);
 	}
 
 	cpuid_count(SGX_CPUID, 0x2, &eax, &ebx, &ecx, &edx);
