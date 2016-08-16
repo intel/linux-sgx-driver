@@ -22,6 +22,7 @@
 #include <linux/rwsem.h>
 #include <linux/sched.h>
 #include <linux/workqueue.h>
+#include <linux/version.h>
 
 /* Number of times to spin before going to sleep because of an interrupt
  * storm.
