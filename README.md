@@ -44,13 +44,9 @@ $ make
 You can find the driver *isgx.ko* generated in the same directory.
 
 ###Install the Intel(R) SGX Driver
-To install the Intel SGX driver, enter the following commands: 
+To install the Intel SGX driver, enter the following command with root privilege:
 ```
-$ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
-$ sudo cp isgx.ko "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
-$ sudo sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"
-$ sudo /sbin/depmod
-$ sudo /sbin/modprobe isgx
+$ sudo make install
 ```
 
 ###Uninstall the Intel(R) SGX Driver
