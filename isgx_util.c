@@ -100,7 +100,7 @@ struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 
 	backing_addr = enclave->backing + entry->addr - enclave->base;
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,4)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,0)
 	ret = get_user_pages_remote(
 #else
 	ret = get_user_pages(
