@@ -61,6 +61,14 @@ static unsigned long isgx_get_unmapped_area(struct file *file,
 					    unsigned long pgoff,
 					    unsigned long flags);
 
+#ifdef CONFIG_COMPAT
+static long isgx_compat_ioctl(struct file *filep, unsigned int cmd,
+			     unsigned long arg)
+{
+	return isgx_ioctl(filep, cmd, arg);
+}
+#endif
+
 static const struct file_operations isgx_fops = {
 	.owner		= THIS_MODULE,
 	.unlocked_ioctl	= isgx_ioctl,

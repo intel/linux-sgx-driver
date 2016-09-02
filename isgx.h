@@ -119,7 +119,7 @@ struct isgx_enclave {
 	unsigned int			flags;
 	struct task_struct		*owner;
 	struct mm_struct		*mm;
-	unsigned long			backing;
+	struct file			*backing;
 	struct list_head		vma_list;
 	struct list_head		load_list;
 	struct kref			refcount;
@@ -155,9 +155,6 @@ extern atomic_t isgx_nr_pids;
  */
 
 long isgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
-#ifdef CONFIG_COMPAT
-long isgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
-#endif
 void isgx_add_page_worker(struct work_struct *work);
 
 /*

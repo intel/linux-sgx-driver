@@ -5,7 +5,6 @@ ifneq ($(KERNELRELEASE),)
 		isgx_ioctl.o \
 		isgx_vma.o \
 		isgx_util.o
-	isgx-$(CONFIG_COMPAT) += isgx_compat_ioctl.o
 	obj-m += isgx.o
 else
 KDIR := /lib/modules/$(shell uname -r)/build

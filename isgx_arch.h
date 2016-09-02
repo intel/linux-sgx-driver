@@ -35,6 +35,32 @@ enum {
 #define BIT_ULL(nr)		(1ULL << (nr))
 #define GENMASK_ULL(h, l)	(((U64_C(1) << ((h) - (l) + 1)) - 1) << (l))
 
+/* SECINFO flags */
+enum isgx_secinfo_flags {
+	SGX_SECINFO_R		= 0x01,
+	SGX_SECINFO_W		= 0x02,
+	SGX_SECINFO_X		= 0x04,
+};
+
+/* SECINFO page types */
+enum isgx_secinfo_pt {
+	SGX_SECINFO_SECS	= 0x000ULL,
+	SGX_SECINFO_TCS		= 0x100ULL,
+	SGX_SECINFO_REG		= 0x200ULL,
+};
+
+struct isgx_secinfo {
+	__u64 flags;
+	__u64 reserved[7];
+} __attribute__((aligned(128)));
+
+struct isgx_einittoken {
+	__u32	valid;
+	__u8	reserved1[206];
+	__u16	isvsvnle;
+	__u8	reserved2[92];
+} __attribute__((aligned(512)));
+
 enum isgx_secs_attributes {
 	ISGX_SECS_A_DEBUG		= BIT_ULL(1),
 	ISGX_SECS_A_MODE64BIT		= BIT_ULL(2),
@@ -81,7 +107,7 @@ struct isgx_tcs {
 	u64 reserved[503];
 };
 
-enum isgx_secinfo_masks {
+enum isgx_secifo_masks {
 	ISGX_SECINFO_PERMISSION_MASK	= GENMASK_ULL(2, 0),
 	ISGX_SECINFO_PAGE_TYPE_MASK	= GENMASK_ULL(15, 8),
 	ISGX_SECINFO_RESERVED_MASK	= (GENMASK_ULL(7, 3) |
