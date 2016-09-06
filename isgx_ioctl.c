@@ -298,16 +298,6 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 		return -EINVAL;
 	}
 
-	down_read(&current->mm->mmap_sem);
-	vma = find_vma(current->mm, secs->base);
-	if (!vma || vma->vm_ops != &isgx_vm_ops ||
-	    vma->vm_start != secs->base ||
-	    vma->vm_end != (secs->base + secs->size)) {
-		kfree(secs);
-		up_read(&current->mm->mmap_sem);
-		return -EINVAL;
-	}
-
 	backing = shmem_file_setup("Intel SGX backing storage",
 				   secs->size + PAGE_SIZE,
 				   VM_NORESERVE);
@@ -317,7 +307,6 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 			 (unsigned long) secs->size,
 			 ret);
 		kfree(secs);
-		up_read(&current->mm->mmap_sem);
 		return PTR_ERR((void *) backing);
 	}
 
@@ -379,14 +368,24 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	if (secs->flags & ISGX_SECS_A_DEBUG)
 		enclave->flags |= ISGX_ENCLAVE_DEBUG;
 
-	evma = kzalloc(sizeof(struct isgx_vma), GFP_KERNEL);
-	if (!evma) {
-		ret = -ENOMEM;
+	down_read(&current->mm->mmap_sem);
+	vma = find_vma(current->mm, secs->base);
+	if (!vma || vma->vm_ops != &isgx_vm_ops ||
+	    vma->vm_start != secs->base ||
+	    vma->vm_end != (secs->base + secs->size)) {
+		up_read(&current->mm->mmap_sem);
+		ret = -EINVAL;
 		goto out;
 	}
-	evma->vma = vma;
-	list_add_tail(&evma->vma_list, &enclave->vma_list);
-	vma->vm_private_data = enclave;
+	evma = kzalloc(sizeof(struct isgx_vma), GFP_KERNEL);
+	if (evma) {
+		evma->vma = vma;
+		list_add_tail(&evma->vma_list, &enclave->vma_list);
+		vma->vm_private_data = enclave;
+	} else {
+		ret = -ENOMEM;
+	}
+	up_read(&current->mm->mmap_sem);
 
 	mutex_lock(&isgx_tgid_ctx_mutex);
 	list_add_tail(&enclave->enclave_list, &enclave->tgid_ctx->enclave_list);
@@ -395,7 +394,6 @@ out:
 	if (ret && enclave)
 		kref_put(&enclave->refcount, isgx_enclave_release);
 	kfree(secs);
-	up_read(&current->mm->mmap_sem);
 	return ret;
 }
 
