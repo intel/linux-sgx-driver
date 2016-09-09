@@ -313,6 +313,7 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	enclave = kzalloc(sizeof(struct isgx_enclave), GFP_KERNEL);
 	if (!enclave) {
 		fput(backing);
+		ret = -ENOMEM;
 		goto out;
 	}
 
