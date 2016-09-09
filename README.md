@@ -48,6 +48,14 @@ To install the Intel SGX driver, enter the following command with root privilege
 ```
 $ sudo make install
 ```
+Note you may see an error complaining "Can't read private key" or similar message. This just means that you don't have access to Ubuntu signing key. The driver should still be installed to /lib/modules/$(KERNELRELEASE)/kernel/drivers/intel/sgx.
+
+### Load the Intel(R) SGX Driver
+
+```
+$ sudo /sbin/depmod
+$ sudo /sbin/modprobe isgx
+```
 
 ###Uninstall the Intel(R) SGX Driver
 Before uninstall the Intel SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
