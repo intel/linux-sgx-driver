@@ -46,9 +46,10 @@ You can find the driver *isgx.ko* generated in the same directory.
 ###Install the Intel(R) SGX Driver
 To install the Intel SGX driver, enter the following command with root privilege:
 ```
-$ sudo make install
+$ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"    
+$ sudo cp isgx.ko "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"    
+$ sudo sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"    
 ```
-Note you may see an error complaining "Can't read private key" or similar message. This just means that you don't have access to Ubuntu signing key. The driver should still be installed to /lib/modules/$(KERNELRELEASE)/kernel/drivers/intel/sgx.
 
 ### Load the Intel(R) SGX Driver
 
