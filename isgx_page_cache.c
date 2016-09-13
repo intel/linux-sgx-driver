@@ -97,8 +97,8 @@ static struct isgx_enclave *isolate_enclave(unsigned long nr_to_scan)
 	return encl;
 }
 
-static void isolate_cluster(struct list_head *dst,
-			    unsigned long nr_to_scan)
+static struct isgx_enclave *isolate_cluster(struct list_head *dst,
+					    unsigned long nr_to_scan)
 {
 	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *entry;
@@ -106,11 +106,11 @@ static void isolate_cluster(struct list_head *dst,
 
 	enclave = isolate_enclave(nr_to_scan);
 	if (!enclave)
-		return;
+		return NULL;
 
 	if (!isgx_pin_mm(enclave)) {
 		kref_put(&enclave->refcount, isgx_enclave_release);
-		return;
+		return NULL;
 	}
 
 	for (i = 0; i < nr_to_scan; i++) {
@@ -137,10 +137,7 @@ static void isolate_cluster(struct list_head *dst,
 	}
 
 	isgx_unpin_mm(enclave);
-	if (list_empty(dst)) {
-		kref_put(&enclave->refcount, isgx_enclave_release);
-		return;
-	}
+	return enclave;
 }
 
 static void isgx_ipi_cb(void *info)
@@ -193,9 +190,8 @@ static int do_ewb(struct isgx_enclave *enclave,
 }
 
 
-static void evict_cluster(struct list_head *src, unsigned int flags)
+static void evict_cluster(struct isgx_enclave *enclave, struct list_head *src)
 {
-	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *entry;
 	struct isgx_enclave_page *tmp;
 	struct page *pages[ISGX_NR_SWAP_CLUSTER_MAX+1];
@@ -206,9 +202,6 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 
 	if (list_empty(src))
 		return;
-
-	entry = list_first_entry(src, struct isgx_enclave_page, load_list);
-	enclave = entry->enclave;
 
 	if (!isgx_pin_mm(enclave)) {
 		while (!list_empty(src)) {
@@ -223,7 +216,6 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 			mutex_unlock(&enclave->lock);
 		}
 
-		kref_put(&enclave->refcount, isgx_enclave_release);
 		return;
 	}
 
@@ -319,11 +311,11 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 	BUG_ON(i != cnt);
 
 	isgx_unpin_mm(enclave);
-	kref_put(&enclave->refcount, isgx_enclave_release);
 }
 
 int kisgxswapd(void *p)
 {
+	struct isgx_enclave *encl;
 	LIST_HEAD(cluster);
 	DEFINE_WAIT(wait);
 	unsigned int nr_free;
@@ -340,8 +332,11 @@ int kisgxswapd(void *p)
 
 
 		if (nr_free < nr_high) {
-			isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
-			evict_cluster(&cluster, 0);
+			encl = isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
+			if (encl) {
+				evict_cluster(encl, &cluster);
+				kref_put(&encl->refcount, isgx_enclave_release);
+			}
 
 			schedule();
 		} else {
@@ -432,6 +427,7 @@ struct isgx_epc_page *isgx_alloc_epc_page(
 	struct isgx_tgid_ctx *tgid_epc_cnt,
 	unsigned int flags)
 {
+	struct isgx_enclave *encl;
 	LIST_HEAD(cluster);
 	struct isgx_epc_page *entry;
 
@@ -451,8 +447,11 @@ struct isgx_epc_page *isgx_alloc_epc_page(
 			break;
 		}
 
-		isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
-		evict_cluster(&cluster, flags);
+		encl = isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
+		if (encl) {
+			evict_cluster(encl, &cluster);
+			kref_put(&encl->refcount, isgx_enclave_release);
+		}
 
 		schedule();
 	}

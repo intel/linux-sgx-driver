@@ -174,7 +174,6 @@ static int construct_enclave_page(struct isgx_enclave *enclave,
 		list_add(&va_page->list, &enclave->va_pages);
 	}
 
-	entry->enclave = enclave;
 	entry->va_page = va_page;
 	entry->va_offset = va_offset;
 	entry->addr = addr;

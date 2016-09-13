@@ -90,7 +90,6 @@ struct isgx_enclave_page {
 	unsigned int		flags;
 	struct isgx_epc_page	*epc_page;
 	struct list_head	load_list;
-	struct isgx_enclave	*enclave;
 	struct isgx_va_page	*va_page;
 	unsigned int		va_offset;
 	struct pcmd		pcmd;
