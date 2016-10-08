@@ -25,10 +25,11 @@
 #include <linux/shmem_fs.h>
 
 struct isgx_add_page_req {
-	struct list_head list;
+	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *enclave_page;
 	struct isgx_secinfo secinfo;
 	u16 mrmask;
+	struct list_head list;
 };
 
 static u16 isgx_isvsvnle_min = 0;
@@ -520,6 +521,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 
 	memcpy(&req->secinfo, secinfo, sizeof(*secinfo));
 
+	req->enclave = enclave;
 	req->enclave_page = enclave_page;
 	req->mrmask = addp->mrmask;
 	empty = list_empty(&enclave->add_page_reqs);
@@ -777,7 +779,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	struct isgx_epc_page *epc_page;
 	struct isgx_enclave_page *enclave_page = req->enclave_page;
 	unsigned int mrmask = req->mrmask;
-	struct isgx_enclave *enclave = enclave_page->enclave;
+	struct isgx_enclave *enclave = req->enclave;
 	unsigned free_flags = 0;
 	struct vm_area_struct *vma;
 	int ret;
