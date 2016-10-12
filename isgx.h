@@ -176,7 +176,8 @@ void isgx_insert_pte(struct isgx_enclave *enclave,
 		     struct isgx_epc_page *epc_page,
 		     struct vm_area_struct *vma);
 int isgx_eremove(struct isgx_epc_page *epc_page);
-int isgx_test_and_clear_young(struct isgx_enclave_page *page);
+int isgx_test_and_clear_young(struct isgx_enclave *enclave,
+			      unsigned long addr);
 struct isgx_vma *isgx_find_vma(struct isgx_enclave *enclave,
 			       unsigned long addr);
 void isgx_zap_tcs_ptes(struct isgx_enclave *enclave,

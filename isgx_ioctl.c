@@ -829,7 +829,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 		goto out;
 	}
 
-	isgx_test_and_clear_young(enclave_page);
+	isgx_test_and_clear_young(enclave, enclave_page->addr);
 
 	enclave_page->epc_page = epc_page;
 	list_add_tail(&enclave_page->load_list, &enclave->load_list);

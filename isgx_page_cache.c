@@ -125,7 +125,7 @@ static void isolate_cluster(struct list_head *dst,
 					 load_list);
 
 		if (!(entry->flags & ISGX_ENCLAVE_PAGE_RESERVED)) {
-			if (!isgx_test_and_clear_young(entry)) {
+			if (!isgx_test_and_clear_young(enclave, entry->addr)) {
 				entry->flags |= ISGX_ENCLAVE_PAGE_RESERVED;
 				list_move_tail(&entry->load_list, dst);
 			}

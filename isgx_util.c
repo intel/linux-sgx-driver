@@ -168,24 +168,21 @@ static int isgx_test_and_clear_young_cb(pte_t *ptep, pgtable_t token,
 
 /**
  * isgx_test_and_clear_young() - is the enclave page recently accessed?
- * @page:	enclave page to be tested for recent access
+ * @enclave:	enclave
+ * @addr:	address of the enclave page
  *
- * Checks the Access (A) bit from the PTE corresponding to the
- * enclave page and clears it. Returns 1 if the page has been
- * recently accessed and 0 if not.
+ * Checks the 'A' bit from the PTE corresponding to the enclave page and
+ * clears it.
  */
-int isgx_test_and_clear_young(struct isgx_enclave_page *page)
+int isgx_test_and_clear_young(struct isgx_enclave *enclave,
+			      unsigned long addr)
 {
-	struct mm_struct *mm;
-	struct isgx_vma *evma = isgx_find_vma(page->enclave, page->addr);
-
+	struct isgx_vma *evma = isgx_find_vma(enclave, addr);
 	if (!evma)
 		return 0;
 
-	mm = evma->vma->vm_mm;
-
-	return apply_to_page_range(mm, page->addr, PAGE_SIZE,
-				   isgx_test_and_clear_young_cb, mm);
+	return apply_to_page_range(enclave->mm, addr, PAGE_SIZE,
+				   isgx_test_and_clear_young_cb, enclave->mm);
 }
 
 /**
