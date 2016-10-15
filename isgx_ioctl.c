@@ -362,7 +362,7 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	isgx_put_epc_page(secs_vaddr);
 
 	if (ret) {
-		isgx_info(enclave, "ECREATE returned %d\n", ret);
+		isgx_info(enclave, "ECREATE returned %d\n", (int)ret);
 		goto out;
 	}
 

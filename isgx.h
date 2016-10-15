@@ -149,6 +149,24 @@ extern u32 isgx_ssaframesize_tbl[64];
 extern struct vm_operations_struct isgx_vm_ops;
 extern atomic_t isgx_nr_pids;
 
+/* Message macros */
+#define isgx_dbg(encl, fmt, ...)					\
+	pr_debug_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			     pid_nr((encl)->tgid_ctx->tgid),		\
+			     (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_info(encl, fmt, ...)					\
+	pr_info_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			    pid_nr((encl)->tgid_ctx->tgid),		\
+			    (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_warn(encl, fmt, ...)					\
+	pr_warn_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			    pid_nr((encl)->tgid_ctx->tgid),		\
+			    (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_err(encl, fmt, ...)					\
+	pr_err_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			   pid_nr((encl)->tgid_ctx->tgid),		\
+			   (void *)(encl)->base, ##__VA_ARGS__)
+
 /*
  * Ioctl subsystem.
  */
@@ -160,10 +178,6 @@ void isgx_add_page_worker(struct work_struct *work);
  * Utility functions
  */
 
-void isgx_dbg(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_info(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_warn(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_err(struct isgx_enclave *enclave, const char *format, ...);
 void *isgx_get_epc_page(struct isgx_epc_page *entry);
 void isgx_put_epc_page(void *epc_page_vaddr);
 struct page *isgx_get_backing_page(struct isgx_enclave* enclave,

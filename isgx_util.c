@@ -17,62 +17,6 @@
 #include <linux/highmem.h>
 #include <linux/shmem_fs.h>
 
-void isgx_dbg(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_debug_ratelimited("isgx: [%d:0x%p] %pV",
-			     pid_nr(enclave->tgid_ctx->tgid),
-			     (void *) enclave->base, &vaf);
-}
-
-void isgx_info(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_info_ratelimited("isgx: [%d:0x%p] %pV",
-			    pid_nr(enclave->tgid_ctx->tgid),
-			    (void *) enclave->base, &vaf);
-}
-
-void isgx_warn(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_warn("isgx: [%d:0x%p] %pV",
-	        pid_nr(enclave->tgid_ctx->tgid),
-	        (void *) enclave->base, &vaf);
-}
-
-void isgx_err(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_err("isgx: [%d:0x%p] %pV",
-	       pid_nr(enclave->tgid_ctx->tgid),
-	       (void *) enclave->base, &vaf);
-}
-
 void *isgx_get_epc_page(struct isgx_epc_page *entry)
 {
 #ifdef CONFIG_X86_32
