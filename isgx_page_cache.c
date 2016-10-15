@@ -281,7 +281,9 @@ static void evict_cluster(struct isgx_enclave *enclave, struct list_head *src)
 					   ISGX_FREE_EREMOVE);
 		}
 
-		isgx_put_backing_page(pages[i++], evma != NULL);
+		if (evma != NULL)
+			set_page_dirty(pages[i]);
+		put_page(pages[i++]);
 
 		entry->epc_page = NULL;
 		entry->flags &= ~ISGX_ENCLAVE_PAGE_RESERVED;
@@ -301,7 +303,8 @@ static void evict_cluster(struct isgx_enclave *enclave, struct list_head *src)
 			 * me).
 			 */
 			isgx_free_epc_page(enclave->secs_page.epc_page, NULL, 0);
-			isgx_put_backing_page(pages[cnt], true);
+			set_page_dirty(pages[cnt]);
+			put_page(pages[cnt]);
 
 			enclave->secs_page.epc_page = NULL;
 		}

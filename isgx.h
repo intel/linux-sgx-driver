@@ -183,7 +183,6 @@ void isgx_put_epc_page(void *epc_page_vaddr);
 struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 				   struct isgx_enclave_page* entry,
 				   bool write);
-void isgx_put_backing_page(struct page *backing_page, bool write);
 void isgx_insert_pte(struct isgx_enclave *enclave,
 		     struct isgx_enclave_page *enclave_page,
 		     struct isgx_epc_page *epc_page,

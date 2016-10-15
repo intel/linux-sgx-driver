@@ -529,9 +529,9 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 	if (empty)
 		queue_work(isgx_add_page_wq, &enclave->add_page_work);
 
-	isgx_put_backing_page(backing_page, true /* write */);
+	set_page_dirty(backing_page);
+	put_page(backing_page);
 out:
-
 	if (ret) {
 		kfree(req);
 		isgx_free_va_slot(enclave_page->va_page,
@@ -805,7 +805,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 
 	/* Do not race with do_exit() */
 	if (!atomic_read(&enclave->mm->mm_users)) {
-		isgx_put_backing_page(backing_page, 0);
+		put_page(backing_page);
 		goto out;
 	}
 
@@ -813,7 +813,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	ret = do_eadd(enclave->secs_page.epc_page, epc_page,
 		      enclave_page->addr, &req->secinfo, backing_page);
 
-	isgx_put_backing_page(backing_page, 0);
+	put_page(backing_page);
 	free_flags |= ISGX_FREE_EREMOVE;
 	if (ret) {
 		isgx_dbg(enclave, "EADD returned %d\n", ret);

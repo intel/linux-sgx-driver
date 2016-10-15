@@ -53,15 +53,6 @@ struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 	return backing;
 }
 
-void isgx_put_backing_page(struct page *backing_page, bool write)
-{
-
-	if (write)
-		set_page_dirty(backing_page);
-
-	page_cache_release(backing_page);
-}
-
 void isgx_insert_pte(struct isgx_enclave *enclave,
 		     struct isgx_enclave_page *enclave_page,
 		     struct isgx_epc_page *epc_page,

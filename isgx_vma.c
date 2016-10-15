@@ -211,7 +211,7 @@ static struct isgx_enclave_page *isgx_vma_do_fault(struct vm_area_struct *vma,
 
 		do_eldu(enclave, &enclave->secs_page, secs_epc_page,
 			backing_page, true /* is_secs */);
-		isgx_put_backing_page(backing_page, 0);
+		put_page(backing_page);
 
 		enclave->secs_page.epc_page = secs_epc_page;
 		enclave->flags &= ~ISGX_ENCLAVE_SECS_EVICTED;
@@ -228,7 +228,7 @@ static struct isgx_enclave_page *isgx_vma_do_fault(struct vm_area_struct *vma,
 
 	do_eldu(enclave, entry, epc_page, backing_page, false /* is_secs */);
 	isgx_insert_pte(enclave, entry, epc_page, vma);
-	isgx_put_backing_page(backing_page, 0);
+	put_page(backing_page);
 	enclave->secs_child_cnt++;
 
 	entry->epc_page = epc_page;
