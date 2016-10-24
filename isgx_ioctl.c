@@ -25,10 +25,11 @@
 #include <linux/shmem_fs.h>
 
 struct isgx_add_page_req {
-	struct list_head list;
+	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *enclave_page;
 	struct isgx_secinfo secinfo;
-	u64 flags;
+	u16 mrmask;
+	struct list_head list;
 };
 
 static u16 isgx_isvsvnle_min = 0;
@@ -173,7 +174,6 @@ static int construct_enclave_page(struct isgx_enclave *enclave,
 		list_add(&va_page->list, &enclave->va_pages);
 	}
 
-	entry->enclave = enclave;
 	entry->va_page = va_page;
 	entry->va_offset = va_offset;
 	entry->addr = addr;
@@ -197,36 +197,6 @@ static int get_enclave(unsigned long addr, struct isgx_enclave **enclave)
 
 	up_read(&mm->mmap_sem);
 
-	return ret;
-}
-
-static int set_enclave(unsigned long addr, struct isgx_enclave *enclave)
-{
-	struct mm_struct *mm = current->mm;
-	struct vm_area_struct *vma;
-	struct isgx_vma *evma;
-	int ret;
-
-	down_read(&mm->mmap_sem);
-
-	ret = isgx_find_enclave(mm, addr, &vma);
-	if (ret != -ENOENT)
-		goto out;
-	else
-		ret = 0;
-
-	vma->vm_private_data = enclave;
-
-	evma = kzalloc(sizeof(struct isgx_vma), GFP_KERNEL);
-	if (!evma) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	evma->vma = vma;
-	list_add_tail(&evma->vma_list, &enclave->vma_list);
-out:
-	up_read(&mm->mmap_sem);
 	return ret;
 }
 
@@ -303,20 +273,21 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 {
 	struct page_info pginfo;
 	struct isgx_secinfo secinfo;
-	struct isgx_create_param *createp =
-		(struct isgx_create_param *) arg;
-	void *secs_la = createp->secs;
+	struct sgx_enclave_create *createp = (struct sgx_enclave_create *)arg;
 	struct isgx_enclave *enclave = NULL;
 	struct isgx_secs *secs = NULL;
 	struct isgx_epc_page *secs_epc_page;
+	struct vm_area_struct *vma;
+	struct isgx_vma *evma;
 	void *secs_vaddr = NULL;
-	unsigned long backing;
+	struct file *backing;
 	long ret;
 
 	secs = kzalloc(sizeof(*secs),  GFP_KERNEL);
 	if (!secs)
 		return -ENOMEM;
-	ret = copy_from_user((void *) secs, secs_la, sizeof (*secs));
+
+	ret = copy_from_user(secs, (void *)createp->src, sizeof (*secs));
 	if (ret) {
 		kfree(secs);
 		return ret;
@@ -327,35 +298,24 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 		return -EINVAL;
 	}
 
-	secs->base = vm_mmap(filep, 0, secs->size,
-			     PROT_READ | PROT_WRITE | PROT_EXEC,
-			     MAP_SHARED, 0);
-	if (IS_ERR((void *) (unsigned long) secs->base)) {
-		kfree(secs);
-		pr_debug("isgx: [%d] vm_mmap() for the EPC of size 0x%lx returned %ld\n",
-			 pid_nr(task_tgid(current->group_leader)),
-			 (unsigned long) secs->size,
-			 ret);
-		return PTR_ERR((void *) (unsigned long) secs->base);
-	}
-
-	backing = vm_mmap(NULL, 0, secs->size + PAGE_SIZE,
-			  PROT_READ | PROT_WRITE,
-			  MAP_PRIVATE, 0);
+	backing = shmem_file_setup("Intel SGX backing storage",
+				   secs->size + PAGE_SIZE,
+				   VM_NORESERVE);
 	if (IS_ERR((void *) backing)) {
-		ret = PTR_ERR((void *) backing);
-		vm_munmap(secs->base, secs->size);
-		kfree(secs);
 		pr_debug("isgx: [%d] vm_mmap() for the backing of size 0x%lx returned %ld\n",
 			 pid_nr(task_tgid(current->group_leader)),
 			 (unsigned long) secs->size,
 			 ret);
+		kfree(secs);
 		return PTR_ERR((void *) backing);
 	}
 
 	enclave = kzalloc(sizeof(struct isgx_enclave), GFP_KERNEL);
-	if (!enclave)
+	if (!enclave) {
+		fput(backing);
+		ret = -ENOMEM;
 		goto out;
+	}
 
 	kref_init(&enclave->refcount);
 	INIT_LIST_HEAD(&enclave->add_page_reqs);
@@ -390,9 +350,6 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	if (ret)
 		goto out;
 
-	isgx_dbg(enclave, "ECREATE backing=0x%lx, size=0x%lx\n",
-		 enclave->backing, enclave->size);
-
 	secs_vaddr = isgx_get_epc_page(enclave->secs_page.epc_page);
 
 	pginfo.srcpge = (unsigned long) secs;
@@ -405,27 +362,38 @@ static long isgx_ioctl_enclave_create(struct file *filep, unsigned int cmd,
 	isgx_put_epc_page(secs_vaddr);
 
 	if (ret) {
-		isgx_info(enclave, "ECREATE returned %d\n", ret);
+		isgx_info(enclave, "ECREATE returned %d\n", (int)ret);
 		goto out;
 	}
 
 	if (secs->flags & ISGX_SECS_A_DEBUG)
 		enclave->flags |= ISGX_ENCLAVE_DEBUG;
 
-	ret = set_enclave(secs->base, enclave);
+	down_read(&current->mm->mmap_sem);
+	vma = find_vma(current->mm, secs->base);
+	if (!vma || vma->vm_ops != &isgx_vm_ops ||
+	    vma->vm_start != secs->base ||
+	    vma->vm_end != (secs->base + secs->size)) {
+		up_read(&current->mm->mmap_sem);
+		ret = -EINVAL;
+		goto out;
+	}
+	evma = kzalloc(sizeof(struct isgx_vma), GFP_KERNEL);
+	if (evma) {
+		evma->vma = vma;
+		list_add_tail(&evma->vma_list, &enclave->vma_list);
+		vma->vm_private_data = enclave;
+	} else {
+		ret = -ENOMEM;
+	}
+	up_read(&current->mm->mmap_sem);
 
 	mutex_lock(&isgx_tgid_ctx_mutex);
 	list_add_tail(&enclave->enclave_list, &enclave->tgid_ctx->enclave_list);
 	mutex_unlock(&isgx_tgid_ctx_mutex);
 out:
-	if (ret) {
-		vm_munmap(secs->base, secs->size);
-		vm_munmap(backing, secs->size + PAGE_SIZE);
-		if (enclave)
-			kref_put(&enclave->refcount, isgx_enclave_release);
-	} else
-		createp->addr = (unsigned long) enclave->base;
-
+	if (ret && enclave)
+		kref_put(&enclave->refcount, isgx_enclave_release);
 	kfree(secs);
 	return ret;
 }
@@ -437,8 +405,9 @@ static int validate_secinfo(struct isgx_secinfo *secinfo)
 	int i;
 
 	if ((secinfo->flags & ISGX_SECINFO_RESERVED_MASK) ||
-	    ((perm & ISGX_SECINFO_W) && !(perm & ISGX_SECINFO_R)) ||
-	    (page_type != ISGX_SECINFO_TCS && page_type != ISGX_SECINFO_REG))
+	    ((perm & SGX_SECINFO_W) && !(perm & SGX_SECINFO_R)) ||
+	    (page_type != SGX_SECINFO_TCS &&
+	     page_type != SGX_SECINFO_REG))
 		return -EINVAL;
 
 	for (i = 0; i < sizeof(secinfo->reserved) / sizeof(u64); i++)
@@ -470,7 +439,7 @@ static int validate_tcs(struct isgx_tcs *tcs)
 
 static int __enclave_add_page(struct isgx_enclave *enclave,
 			      struct isgx_enclave_page *enclave_page,
-			      struct isgx_add_param *addp,
+			      struct sgx_enclave_add_page *addp,
 			      struct isgx_secinfo *secinfo)
 {
 	u64 page_type = secinfo->flags & ISGX_SECINFO_PAGE_TYPE_MASK;
@@ -488,8 +457,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 		return -ENOMEM;
 
 	tmp_vaddr = kmap(tmp_page);
-	ret = copy_from_user((void *) tmp_vaddr, (void *) addp->user_addr,
-			     PAGE_SIZE);
+	ret = copy_from_user((void *)tmp_vaddr, (void *)addp->src, PAGE_SIZE);
 	kunmap(tmp_page);
 	if (ret) {
 		__free_page(tmp_page);
@@ -501,7 +469,7 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 		return -EINVAL;
 	}
 
-	if (page_type == ISGX_SECINFO_TCS) {
+	if (page_type == SGX_SECINFO_TCS) {
 		tcs = (struct isgx_tcs *) kmap(tmp_page);
 		ret = validate_tcs(tcs);
 		kunmap(tmp_page);
@@ -547,22 +515,23 @@ static int __enclave_add_page(struct isgx_enclave *enclave,
 	kunmap(backing_page);
 	kunmap(tmp_page);
 
-	if (page_type == ISGX_SECINFO_TCS)
+	if (page_type == SGX_SECINFO_TCS)
 		enclave_page->flags |= ISGX_ENCLAVE_PAGE_TCS;
 
 	memcpy(&req->secinfo, secinfo, sizeof(*secinfo));
 
+	req->enclave = enclave;
 	req->enclave_page = enclave_page;
-	req->flags = addp->flags;
+	req->mrmask = addp->mrmask;
 	empty = list_empty(&enclave->add_page_reqs);
 	kref_get(&enclave->refcount);
 	list_add_tail(&req->list, &enclave->add_page_reqs);
 	if (empty)
 		queue_work(isgx_add_page_wq, &enclave->add_page_work);
 
-	isgx_put_backing_page(backing_page, true /* write */);
+	set_page_dirty(backing_page);
+	put_page(backing_page);
 out:
-
 	if (ret) {
 		kfree(req);
 		isgx_free_va_slot(enclave_page->va_page,
@@ -579,13 +548,13 @@ out:
 static long isgx_ioctl_enclave_add_page(struct file *filep, unsigned int cmd,
 					unsigned long arg)
 {
-	struct isgx_add_param *addp;
+	struct sgx_enclave_add_page *addp;
 	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *page;
 	struct isgx_secinfo secinfo;
 	int ret;
 
-	addp = (struct isgx_add_param *) arg;
+	addp = (struct sgx_enclave_add_page *) arg;
 
 	if (addp->addr & (PAGE_SIZE - 1))
 		return -EINVAL;
@@ -623,13 +592,13 @@ static int __isgx_enclave_init(struct isgx_enclave *enclave,
 			       char *sigstruct,
 			       struct isgx_einittoken *einittoken)
 {
-	int ret = ISGX_UNMASKED_EVENT;
+	int ret = SGX_UNMASKED_EVENT;
 	void *secs_va = NULL;
 	int i;
 	int j;
 
 	if (einittoken->valid && einittoken->isvsvnle < isgx_isvsvnle_min)
-		return ISGX_LE_ROLLBACK;
+		return SGX_LE_ROLLBACK;
 
 	for (i = 0; i < EINIT_TRY_COUNT; i++) {
 		for (j = 0; j < EINIT_SPIN_COUNT; j++) {
@@ -638,13 +607,13 @@ static int __isgx_enclave_init(struct isgx_enclave *enclave,
 			ret = __einit(sigstruct, einittoken, secs_va);
 			isgx_put_epc_page(secs_va);
 			mutex_unlock(&enclave->lock);
-			if (ret == ISGX_UNMASKED_EVENT)
+			if (ret == SGX_UNMASKED_EVENT)
 				continue;
 			else
 				break;
 		}
 
-		if (ret != ISGX_UNMASKED_EVENT)
+		if (ret != SGX_UNMASKED_EVENT)
 			goto out;
 
 		msleep_interruptible(EINIT_BACKOFF_TIME);
@@ -669,7 +638,7 @@ static long isgx_ioctl_enclave_init(struct file *filep, unsigned int cmd,
 				    unsigned long arg)
 {
 	int ret = -EINVAL;
-	struct isgx_init_param *initp = (struct isgx_init_param *) arg;
+	struct sgx_enclave_init *initp = (struct sgx_enclave_init *) arg;
 	unsigned long enclave_id = initp->addr;
 	char *sigstruct;
 	struct isgx_einittoken *einittoken;
@@ -684,11 +653,13 @@ static long isgx_ioctl_enclave_init(struct file *filep, unsigned int cmd,
 	einittoken = (struct isgx_einittoken *)
 		((unsigned long) sigstruct + PAGE_SIZE / 2);
 
-	ret = copy_from_user(sigstruct, initp->sigstruct, SIGSTRUCT_SIZE);
+	ret = copy_from_user(sigstruct, (void *)initp->sigstruct,
+			     SIGSTRUCT_SIZE);
 	if (ret)
 		goto out_free_page;
 
-	ret = copy_from_user(einittoken, initp->einittoken, EINITTOKEN_SIZE);
+	ret = copy_from_user(einittoken, (void *)initp->einittoken,
+			     EINITTOKEN_SIZE);
 	if (ret)
 		goto out_free_page;
 
@@ -715,26 +686,6 @@ out_free_page:
 	return ret;
 }
 
-static long isgx_ioctl_enclave_destroy(struct file *filep, unsigned int cmd,
-				       unsigned long arg)
-{
-	struct isgx_destroy_param *destroyp =
-		(struct isgx_destroy_param *) arg;
-	unsigned long enclave_id = destroyp->addr;
-	struct isgx_enclave *enclave;
-	int ret;
-
-	ret = get_enclave(enclave_id, &enclave);
-	if (ret)
-		return ret;
-
-	vm_munmap(enclave->base, enclave->size);
-	vm_munmap(enclave->backing, enclave->size + PAGE_SIZE);
-
-	kref_put(&enclave->refcount, isgx_enclave_release);
-	return 0;
-}
-
 typedef long (*isgx_ioctl_t)(struct file *filep, unsigned int cmd,
 			     unsigned long arg);
 
@@ -745,17 +696,14 @@ long isgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	long ret;
 
 	switch (cmd) {
-	case ISGX_IOCTL_ENCLAVE_CREATE:
+	case SGX_IOC_ENCLAVE_CREATE:
 		handler = isgx_ioctl_enclave_create;
 		break;
-	case ISGX_IOCTL_ENCLAVE_ADD_PAGE:
+	case SGX_IOC_ENCLAVE_ADD_PAGE:
 		handler = isgx_ioctl_enclave_add_page;
 		break;
-	case ISGX_IOCTL_ENCLAVE_INIT:
+	case SGX_IOC_ENCLAVE_INIT:
 		handler = isgx_ioctl_enclave_init;
-		break;
-	case ISGX_IOCTL_ENCLAVE_DESTROY:
-		handler = isgx_ioctl_enclave_destroy;
 		break;
 	default:
 		return -EINVAL;
@@ -799,19 +747,23 @@ static int do_eadd(struct isgx_epc_page *secs_page,
 	return ret;
 }
 
-static int do_eextend(struct isgx_epc_page *secs_page,
-		      struct isgx_epc_page *epc_page)
+static int sgx_measure_page(struct isgx_epc_page *secs_page,
+			    struct isgx_epc_page *epc_page,
+			    u16 mrmask)
 {
 	void *secs;
 	void *epc;
 	int ret = 0;
-	int i;
+	int i, j;
 
-	for (i = 0; i < 0x1000 && !ret; i += 0x100) {
+	for (i = 0, j = 1; i < 0x1000 && !ret; i += 0x100, j <<= 1) {
+		if (!(j & mrmask))
+			continue;
+
 		secs = isgx_get_epc_page(secs_page);
 		epc = isgx_get_epc_page(epc_page);
 
-		ret = __eextend(secs, (void *)((unsigned long) epc + i));
+		ret = __eextend(secs, (void *)((unsigned long)epc + i));
 
 		isgx_put_epc_page(epc);
 		isgx_put_epc_page(secs);
@@ -825,8 +777,8 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	struct page *backing_page;
 	struct isgx_epc_page *epc_page;
 	struct isgx_enclave_page *enclave_page = req->enclave_page;
-	unsigned int flags = req->flags;
-	struct isgx_enclave *enclave = enclave_page->enclave;
+	unsigned int mrmask = req->mrmask;
+	struct isgx_enclave *enclave = req->enclave;
 	unsigned free_flags = 0;
 	struct vm_area_struct *vma;
 	int ret;
@@ -853,7 +805,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 
 	/* Do not race with do_exit() */
 	if (!atomic_read(&enclave->mm->mm_users)) {
-		isgx_put_backing_page(backing_page, 0);
+		put_page(backing_page);
 		goto out;
 	}
 
@@ -861,7 +813,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	ret = do_eadd(enclave->secs_page.epc_page, epc_page,
 		      enclave_page->addr, &req->secinfo, backing_page);
 
-	isgx_put_backing_page(backing_page, 0);
+	put_page(backing_page);
 	free_flags |= ISGX_FREE_EREMOVE;
 	if (ret) {
 		isgx_dbg(enclave, "EADD returned %d\n", ret);
@@ -870,15 +822,13 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 
 	enclave->secs_child_cnt++;
 
-	if (!(flags & ISGX_ADD_SKIP_EEXTEND)) {
-		ret = do_eextend(enclave->secs_page.epc_page, epc_page);
-		if (ret) {
-			isgx_dbg(enclave, "EEXTEND returned %d\n", ret);
-			goto out;
-		}
+	ret = sgx_measure_page(enclave->secs_page.epc_page, epc_page, mrmask);
+	if (ret) {
+		isgx_dbg(enclave, "EEXTEND returned %d\n", ret);
+		goto out;
 	}
 
-	isgx_test_and_clear_young(enclave_page);
+	isgx_test_and_clear_young(enclave, enclave_page->addr);
 
 	enclave_page->epc_page = epc_page;
 	list_add_tail(&enclave_page->load_list, &enclave->load_list);

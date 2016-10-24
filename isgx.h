@@ -90,7 +90,6 @@ struct isgx_enclave_page {
 	unsigned int		flags;
 	struct isgx_epc_page	*epc_page;
 	struct list_head	load_list;
-	struct isgx_enclave	*enclave;
 	struct isgx_va_page	*va_page;
 	unsigned int		va_offset;
 	struct pcmd		pcmd;
@@ -119,7 +118,7 @@ struct isgx_enclave {
 	unsigned int			flags;
 	struct task_struct		*owner;
 	struct mm_struct		*mm;
-	unsigned long			backing;
+	struct file			*backing;
 	struct list_head		vma_list;
 	struct list_head		load_list;
 	struct kref			refcount;
@@ -150,36 +149,47 @@ extern u32 isgx_ssaframesize_tbl[64];
 extern struct vm_operations_struct isgx_vm_ops;
 extern atomic_t isgx_nr_pids;
 
+/* Message macros */
+#define isgx_dbg(encl, fmt, ...)					\
+	pr_debug_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			     pid_nr((encl)->tgid_ctx->tgid),		\
+			     (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_info(encl, fmt, ...)					\
+	pr_info_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			    pid_nr((encl)->tgid_ctx->tgid),		\
+			    (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_warn(encl, fmt, ...)					\
+	pr_warn_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			    pid_nr((encl)->tgid_ctx->tgid),		\
+			    (void *)(encl)->base, ##__VA_ARGS__)
+#define isgx_err(encl, fmt, ...)					\
+	pr_err_ratelimited("isgx: [%d:0x%p] " fmt,			\
+			   pid_nr((encl)->tgid_ctx->tgid),		\
+			   (void *)(encl)->base, ##__VA_ARGS__)
+
 /*
  * Ioctl subsystem.
  */
 
 long isgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
-#ifdef CONFIG_COMPAT
-long isgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
-#endif
 void isgx_add_page_worker(struct work_struct *work);
 
 /*
  * Utility functions
  */
 
-void isgx_dbg(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_info(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_warn(struct isgx_enclave *enclave, const char *format, ...);
-void isgx_err(struct isgx_enclave *enclave, const char *format, ...);
 void *isgx_get_epc_page(struct isgx_epc_page *entry);
 void isgx_put_epc_page(void *epc_page_vaddr);
 struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 				   struct isgx_enclave_page* entry,
 				   bool write);
-void isgx_put_backing_page(struct page *backing_page, bool write);
 void isgx_insert_pte(struct isgx_enclave *enclave,
 		     struct isgx_enclave_page *enclave_page,
 		     struct isgx_epc_page *epc_page,
 		     struct vm_area_struct *vma);
 int isgx_eremove(struct isgx_epc_page *epc_page);
-int isgx_test_and_clear_young(struct isgx_enclave_page *page);
+int isgx_test_and_clear_young(struct isgx_enclave *enclave,
+			      unsigned long addr);
 struct isgx_vma *isgx_find_vma(struct isgx_enclave *enclave,
 			       unsigned long addr);
 void isgx_zap_tcs_ptes(struct isgx_enclave *enclave,

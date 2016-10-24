@@ -97,8 +97,8 @@ static struct isgx_enclave *isolate_enclave(unsigned long nr_to_scan)
 	return encl;
 }
 
-static void isolate_cluster(struct list_head *dst,
-			    unsigned long nr_to_scan)
+static struct isgx_enclave *isolate_cluster(struct list_head *dst,
+					    unsigned long nr_to_scan)
 {
 	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *entry;
@@ -106,11 +106,11 @@ static void isolate_cluster(struct list_head *dst,
 
 	enclave = isolate_enclave(nr_to_scan);
 	if (!enclave)
-		return;
+		return NULL;
 
 	if (!isgx_pin_mm(enclave)) {
 		kref_put(&enclave->refcount, isgx_enclave_release);
-		return;
+		return NULL;
 	}
 
 	for (i = 0; i < nr_to_scan; i++) {
@@ -125,7 +125,7 @@ static void isolate_cluster(struct list_head *dst,
 					 load_list);
 
 		if (!(entry->flags & ISGX_ENCLAVE_PAGE_RESERVED)) {
-			if (!isgx_test_and_clear_young(entry)) {
+			if (!isgx_test_and_clear_young(enclave, entry->addr)) {
 				entry->flags |= ISGX_ENCLAVE_PAGE_RESERVED;
 				list_move_tail(&entry->load_list, dst);
 			}
@@ -137,10 +137,7 @@ static void isolate_cluster(struct list_head *dst,
 	}
 
 	isgx_unpin_mm(enclave);
-	if (list_empty(dst)) {
-		kref_put(&enclave->refcount, isgx_enclave_release);
-		return;
-	}
+	return enclave;
 }
 
 static void isgx_ipi_cb(void *info)
@@ -186,16 +183,15 @@ static int do_ewb(struct isgx_enclave *enclave,
 	isgx_put_epc_page(epc);
 	kunmap_atomic((void *) pginfo.srcpge);
 
-	if (ret != 0 && ret != ISGX_NOT_TRACKED)
+	if (ret != 0 && ret != SGX_NOT_TRACKED)
 		isgx_err(enclave, "EWB returned %d\n", ret);
 
 	return ret;
 }
 
 
-static void evict_cluster(struct list_head *src, unsigned int flags)
+static void evict_cluster(struct isgx_enclave *enclave, struct list_head *src)
 {
-	struct isgx_enclave *enclave;
 	struct isgx_enclave_page *entry;
 	struct isgx_enclave_page *tmp;
 	struct page *pages[ISGX_NR_SWAP_CLUSTER_MAX+1];
@@ -206,9 +202,6 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 
 	if (list_empty(src))
 		return;
-
-	entry = list_first_entry(src, struct isgx_enclave_page, load_list);
-	enclave = entry->enclave;
 
 	if (!isgx_pin_mm(enclave)) {
 		while (!list_empty(src)) {
@@ -223,7 +216,6 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 			mutex_unlock(&enclave->lock);
 		}
 
-		kref_put(&enclave->refcount, isgx_enclave_release);
 		return;
 	}
 
@@ -275,7 +267,7 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 		evma = isgx_find_vma(enclave, entry->addr);
 		if (evma) {
 			ret = do_ewb(enclave, entry, pages[i]);
-			BUG_ON(ret != 0 && ret != ISGX_NOT_TRACKED);
+			BUG_ON(ret != 0 && ret != SGX_NOT_TRACKED);
 			/* Only kick out threads with an IPI if needed. */
 			if (ret) {
 				smp_call_function(isgx_ipi_cb, NULL, 1);
@@ -289,7 +281,9 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 					   ISGX_FREE_EREMOVE);
 		}
 
-		isgx_put_backing_page(pages[i++], evma != NULL);
+		if (evma != NULL)
+			set_page_dirty(pages[i]);
+		put_page(pages[i++]);
 
 		entry->epc_page = NULL;
 		entry->flags &= ~ISGX_ENCLAVE_PAGE_RESERVED;
@@ -309,7 +303,8 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 			 * me).
 			 */
 			isgx_free_epc_page(enclave->secs_page.epc_page, NULL, 0);
-			isgx_put_backing_page(pages[cnt], true);
+			set_page_dirty(pages[cnt]);
+			put_page(pages[cnt]);
 
 			enclave->secs_page.epc_page = NULL;
 		}
@@ -319,11 +314,11 @@ static void evict_cluster(struct list_head *src, unsigned int flags)
 	BUG_ON(i != cnt);
 
 	isgx_unpin_mm(enclave);
-	kref_put(&enclave->refcount, isgx_enclave_release);
 }
 
 int kisgxswapd(void *p)
 {
+	struct isgx_enclave *encl;
 	LIST_HEAD(cluster);
 	DEFINE_WAIT(wait);
 	unsigned int nr_free;
@@ -340,8 +335,11 @@ int kisgxswapd(void *p)
 
 
 		if (nr_free < nr_high) {
-			isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
-			evict_cluster(&cluster, 0);
+			encl = isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
+			if (encl) {
+				evict_cluster(encl, &cluster);
+				kref_put(&encl->refcount, isgx_enclave_release);
+			}
 
 			schedule();
 		} else {
@@ -432,6 +430,7 @@ struct isgx_epc_page *isgx_alloc_epc_page(
 	struct isgx_tgid_ctx *tgid_epc_cnt,
 	unsigned int flags)
 {
+	struct isgx_enclave *encl;
 	LIST_HEAD(cluster);
 	struct isgx_epc_page *entry;
 
@@ -451,8 +450,11 @@ struct isgx_epc_page *isgx_alloc_epc_page(
 			break;
 		}
 
-		isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
-		evict_cluster(&cluster, flags);
+		encl = isolate_cluster(&cluster, ISGX_NR_SWAP_CLUSTER_MAX);
+		if (encl) {
+			evict_cluster(encl, &cluster);
+			kref_put(&encl->refcount, isgx_enclave_release);
+		}
 
 		schedule();
 	}

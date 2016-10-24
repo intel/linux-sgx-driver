@@ -17,62 +17,6 @@
 #include <linux/highmem.h>
 #include <linux/shmem_fs.h>
 
-void isgx_dbg(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_debug_ratelimited("isgx: [%d:0x%p] %pV",
-			     pid_nr(enclave->tgid_ctx->tgid),
-			     (void *) enclave->base, &vaf);
-}
-
-void isgx_info(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_info_ratelimited("isgx: [%d:0x%p] %pV",
-			    pid_nr(enclave->tgid_ctx->tgid),
-			    (void *) enclave->base, &vaf);
-}
-
-void isgx_warn(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_warn("isgx: [%d:0x%p] %pV",
-	        pid_nr(enclave->tgid_ctx->tgid),
-	        (void *) enclave->base, &vaf);
-}
-
-void isgx_err(struct isgx_enclave *enclave, const char *format, ...)
-{
-	struct va_format vaf;
-	va_list args;
-
-	va_start(args, format);
-	vaf.fmt = format;
-	vaf.va = &args;
-
-	pr_err("isgx: [%d:0x%p] %pV",
-	       pid_nr(enclave->tgid_ctx->tgid),
-	       (void *) enclave->base, &vaf);
-}
-
 void *isgx_get_epc_page(struct isgx_epc_page *entry)
 {
 #ifdef CONFIG_X86_32
@@ -94,42 +38,19 @@ struct page *isgx_get_backing_page(struct isgx_enclave* enclave,
 				   struct isgx_enclave_page* entry,
 				   bool write)
 {
-	struct page *user_page;
-	unsigned long backing_addr;
-	int ret;
+	struct page *backing;
+	struct inode *inode;
+	struct address_space *mapping;
+	gfp_t gfpmask;
+	pgoff_t index;
 
-	backing_addr = enclave->backing + entry->addr - enclave->base;
+	inode = enclave->backing->f_path.dentry->d_inode;
+	mapping = inode->i_mapping;
+	gfpmask = mapping_gfp_mask(mapping);
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,6,4)
-	ret = get_user_pages_remote(
-#else
-	ret = get_user_pages(
-#endif
-			     enclave->owner,
-			     enclave->mm,
-			     backing_addr,
-			     1, /* nr_pages */
-			     write, /* write */
-			     0, /* force */
-			     &user_page,
-			     NULL);
-	if (ret < 0) {
-		isgx_dbg(enclave,
-			 "get_user_pages() for the backing 0x%lx "\
-			 "returned %d\n",
-			 entry->addr, ret);
-		return ERR_PTR(ret);
-	}
-
-	return user_page;
-}
-
-void isgx_put_backing_page(struct page *backing_page, bool write)
-{
-	if (write)
-		set_page_dirty(backing_page);
-
-	put_page(backing_page);
+	index = (entry->addr - enclave->base) >> PAGE_SHIFT;
+	backing = shmem_read_mapping_page_gfp(mapping, index, gfpmask);
+	return backing;
 }
 
 void isgx_insert_pte(struct isgx_enclave *enclave,
@@ -182,24 +103,21 @@ static int isgx_test_and_clear_young_cb(pte_t *ptep, pgtable_t token,
 
 /**
  * isgx_test_and_clear_young() - is the enclave page recently accessed?
- * @page:	enclave page to be tested for recent access
+ * @enclave:	enclave
+ * @addr:	address of the enclave page
  *
- * Checks the Access (A) bit from the PTE corresponding to the
- * enclave page and clears it. Returns 1 if the page has been
- * recently accessed and 0 if not.
+ * Checks the 'A' bit from the PTE corresponding to the enclave page and
+ * clears it.
  */
-int isgx_test_and_clear_young(struct isgx_enclave_page *page)
+int isgx_test_and_clear_young(struct isgx_enclave *enclave,
+			      unsigned long addr)
 {
-	struct mm_struct *mm;
-	struct isgx_vma *evma = isgx_find_vma(page->enclave, page->addr);
-
+	struct isgx_vma *evma = isgx_find_vma(enclave, addr);
 	if (!evma)
 		return 0;
 
-	mm = evma->vma->vm_mm;
-
-	return apply_to_page_range(mm, page->addr, PAGE_SIZE,
-				   isgx_test_and_clear_young_cb, mm);
+	return apply_to_page_range(enclave->mm, addr, PAGE_SIZE,
+				   isgx_test_and_clear_young_cb, enclave->mm);
 }
 
 /**
@@ -343,7 +261,7 @@ int isgx_find_enclave(struct mm_struct *mm, unsigned long addr,
 
 	if (enclave->flags & ISGX_ENCLAVE_SUSPEND) {
 		isgx_info(enclave,  "suspend ID has been changed");
-		return ISGX_POWER_LOST_ENCLAVE;
+		return SGX_POWER_LOST_ENCLAVE;
 	}
 
 	return 0;
@@ -418,5 +336,9 @@ void isgx_enclave_release(struct kref *ref)
 
 	if (enclave->tgid_ctx)
 		kref_put(&enclave->tgid_ctx->refcount, release_tgid_ctx);
+
+	if (enclave->backing)
+		fput(enclave->backing);
+
 	kfree(enclave);
 }
