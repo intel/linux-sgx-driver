@@ -16,6 +16,7 @@
 #include "isgx.h"
 #include <linux/highmem.h>
 #include <linux/shmem_fs.h>
+#include <linux/file.h>
 
 void *isgx_get_epc_page(struct isgx_epc_page *entry)
 {
