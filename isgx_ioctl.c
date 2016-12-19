@@ -237,7 +237,7 @@ static int validate_secs(const struct isgx_secs *secs)
 
 	for (i = 2; i < 64; i++) {
 		tmp = isgx_ssaframesize_tbl[i];
-		if (((1 << i) & secs->xfrm) && (tmp > needed_ssaframesize))
+		if (((1UL << i) & secs->xfrm) && (tmp > needed_ssaframesize))
 			needed_ssaframesize = tmp;
 	}
 
