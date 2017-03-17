@@ -7,9 +7,9 @@ Introduction
 ------------
 Intel(R) Software Guard Extensions (Intel(R) SGX) is an Intel technology for application developers seeking to protect select code and data from disclosure or modification.
 
-The Linux SGX software stack is comprised of the SGX driver, the SGX SDK, and the SGX Platform Software. The SGX SDK and SGX PSW are hosted in the [linux-sgx](https://github.com/01org/linux-sgx) project.
+The Linux SGX software stack is comprised of the Intel(R) SGX driver, the Intel(R) SGX SDK, and the Intel(R) SGX Platform Software. The Intel(R) SGX SDK and Intel(R) SGX PSW are hosted in the [linux-sgx](https://github.com/01org/linux-sgx) project.
 
-The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux SGX software stack, which will be used until the driver upstreaming process is complete. 
+The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which will be used until the driver upstreaming process is complete. 
 
 License
 -------
@@ -29,22 +29,25 @@ Documentation
 Build and Install the Intel(R) SGX Driver
 -----------------------------------------
 
-###Prerequisites
+### Prerequisites
 - Ensure that you have the following required operating systems:  
-  Ubuntu\* Desktop-14.04-LTS 64bits
+  * Ubuntu* Desktop-16.04-LTS 64bits
+  * Red Hat Enterprise Linux Server release 7.2 64bits
+  * CentOS 7.3.1611 64bits
 - Ensure that you have the following required hardware:  
-  6th Generation Intel(R) Core(TM) Processor (code named Skylake)
+  * 6th Generation Intel(R) Core(TM) Processor (code named Skylake)
+  * 7th Generation Intel(R) Core(TM) Processor (code named Kaby Lake)
 - Configure the system with the **SGX hardware enabled** option.
 
-###Build the Intel(R) SGX Driver
-To build Intel SGX driver, change the directory to the driver path and enter the following command:
+### Build the Intel(R) SGX Driver
+To build Intel(R) SGX driver, change the directory to the driver path and enter the following command:
 ```
 $ make
 ```
 You can find the driver *isgx.ko* generated in the same directory.
 
-###Install the Intel(R) SGX Driver
-To install the Intel SGX driver, enter the following command with root privilege:
+### Install the Intel(R) SGX Driver
+To install the Intel(R) SGX driver, enter the following command with root privilege:
 ```
 $ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"    
 $ sudo cp isgx.ko "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"    
@@ -52,10 +55,14 @@ $ sudo sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"
 $ sudo /sbin/depmod
 $ sudo /sbin/modprobe isgx
 ```
+On Red Hat Enterprise Linux Server or CentOS, need to run below command on each reboot
+```
+$ sudo /sbin/modprobe isgx
+```    
 
-###Uninstall the Intel(R) SGX Driver
-Before uninstall the Intel SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
-To uninstall the Intel SGX driver, enter the following commands: 
+### Uninstall the Intel(R) SGX Driver
+Before uninstall the Intel(R) SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
+To uninstall the Intel(R) SGX driver, enter the following commands: 
 ```
 $ sudo /sbin/modprobe -r isgx
 $ sudo rm -rf "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
