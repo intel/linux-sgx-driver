@@ -84,7 +84,7 @@ int isgx_eremove(struct isgx_epc_page *epc_page)
 	isgx_put_epc_page(epc);
 
 	if (ret)
-		pr_debug_ratelimited("EREMOVE returned %d\n", ret);
+		pr_err("EREMOVE returned %d\n", ret);
 
 	return ret;
 }
