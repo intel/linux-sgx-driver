@@ -479,7 +479,7 @@ void isgx_free_epc_page(struct isgx_epc_page *entry,
 	}
 
 	if (flags & ISGX_FREE_EREMOVE)
-		BUG_ON(isgx_eremove(entry));
+		isgx_eremove(entry);
 
 	spin_lock(&isgx_free_list_lock);
 	list_add(&entry->free_list, &isgx_free_list);
