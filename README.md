@@ -21,10 +21,8 @@ See CONTRIBUTING.md for details.
 
 Documentation
 -------------
-- [Intel(R) SGX for Linux\* OS][1] project home page on [01.org](http://01.org)
-- [Intel(R) SGX Programming Reference][2]
-[1]: https://01.org/intel-softwareguard-extensions
-[2]: https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf
+- [Intel(R) SGX for Linux\* OS](https://01.org/intel-softwareguard-extensions) project home page on [01.org](http://01.org)
+- [Intel(R) SGX Programming Reference](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf)
 
 Build and Install the Intel(R) SGX Driver
 -----------------------------------------
