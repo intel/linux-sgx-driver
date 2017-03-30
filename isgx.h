@@ -194,7 +194,7 @@ struct isgx_vma *isgx_find_vma(struct isgx_enclave *enclave,
 			       unsigned long addr);
 void isgx_zap_tcs_ptes(struct isgx_enclave *enclave,
 		       struct vm_area_struct *vma);
-bool isgx_pin_mm(struct isgx_enclave *encl);
+bool isgx_pin_mm(struct isgx_enclave *encl, bool pin_suspend);
 void isgx_unpin_mm(struct isgx_enclave *encl);
 void isgx_invalidate(struct isgx_enclave *encl);
 int isgx_find_enclave(struct mm_struct *mm, unsigned long addr,
