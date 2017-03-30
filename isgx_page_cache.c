@@ -108,7 +108,7 @@ static struct isgx_enclave *isolate_cluster(struct list_head *dst,
 	if (!enclave)
 		return NULL;
 
-	if (!isgx_pin_mm(enclave)) {
+	if (!isgx_pin_mm(enclave, true)) {
 		kref_put(&enclave->refcount, isgx_enclave_release);
 		return NULL;
 	}
@@ -203,7 +203,7 @@ static void evict_cluster(struct isgx_enclave *enclave, struct list_head *src)
 	if (list_empty(src))
 		return;
 
-	if (!isgx_pin_mm(enclave)) {
+	if (!isgx_pin_mm(enclave, false)) {
 		while (!list_empty(src)) {
 			entry = list_first_entry(src, struct isgx_enclave_page,
 						 load_list);

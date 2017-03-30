@@ -787,7 +787,7 @@ static bool process_add_page_req(struct isgx_add_page_req *req)
 	if (IS_ERR(epc_page))
 		return false;
 
-	if (!isgx_pin_mm(enclave)) {
+	if (!isgx_pin_mm(enclave, false)) {
 		isgx_free_epc_page(epc_page, enclave, 0);
 		return false;
 	}

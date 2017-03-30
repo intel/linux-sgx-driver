@@ -171,28 +171,33 @@ void isgx_zap_tcs_ptes(struct isgx_enclave *enclave, struct vm_area_struct *vma)
 /**
  * isgx_pin_mm - pin the mm_struct of an enclave
  *
- * @encl:	an enclave
+ * @encl:	 an enclave
+ * @pin_suspend: 0 - do not pin this enclave when suspended
+ *		 1 - pin otherwise
  *
  * Locks down mmap_sem of an enclave if it still has VMAs and was not suspended.
  * Returns true if this the case.
  */
-bool isgx_pin_mm(struct isgx_enclave *encl)
+bool isgx_pin_mm(struct isgx_enclave *encl, bool pin_suspend)
 {
-	if (encl->flags & ISGX_ENCLAVE_SUSPEND)
+	bool force_pin_suspend = pin_suspend &&
+				(encl->flags & ISGX_ENCLAVE_SUSPEND);
+
+	if (encl->flags & ISGX_ENCLAVE_SUSPEND && !pin_suspend)
 		return false;
 
 	mutex_lock(&encl->lock);
-	if (!list_empty(&encl->vma_list)) {
-		atomic_inc(&encl->mm->mm_count);
-	} else {
+	if (list_empty(&encl->vma_list) && !force_pin_suspend) {
 		mutex_unlock(&encl->lock);
 		return false;
+	} else {
+		atomic_inc(&encl->mm->mm_count);
 	}
 	mutex_unlock(&encl->lock);
 
 	down_read(&encl->mm->mmap_sem);
 
-	if (list_empty(&encl->vma_list)) {
+	if (list_empty(&encl->vma_list) && !force_pin_suspend) {
 		isgx_unpin_mm(encl);
 		return false;
 	}
