@@ -251,7 +251,11 @@ out:
 
 static int isgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
+	unsigned long addr = vmf->address;
+#else
 	unsigned long addr = (unsigned long) vmf->virtual_address;
+#endif
 	struct isgx_enclave_page *entry;
 
 	entry = isgx_vma_do_fault(vma, addr, 0);
