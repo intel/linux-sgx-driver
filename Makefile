@@ -1,10 +1,10 @@
 ifneq ($(KERNELRELEASE),)
 	isgx-y := \
-		isgx_main.o \
-		isgx_page_cache.o \
-		isgx_ioctl.o \
-		isgx_vma.o \
-		isgx_util.o
+		sgx_main.o \
+		sgx_page_cache.o \
+		sgx_ioctl.o \
+		sgx_vma.o \
+		sgx_util.o
 	obj-m += isgx.o
 else
 KDIR := /lib/modules/$(shell uname -r)/build
