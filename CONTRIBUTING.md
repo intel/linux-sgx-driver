@@ -5,6 +5,9 @@
 linux-sgx-driver GitHub Issues tracks SGX out-of-tree kernel mode driver design and development issues, bugs.
 Please note Intel is concurrently working on upstreaming an in-tree driver. This driver will be used untill the upstreaming process is completed. 
 
+IMPORTANT: Since current SGX driver's code is a snaphot of the in-kernel SGX module (see README.md), contributions not related to bugs
+and not related to kernel version support should go to https://github.com/jsakkine-intel/linux-sgx.git 
+
 When reporting bugs, please provide as much details to reproduce the bug as possible:
 * simple user space test code
 * kernel version
