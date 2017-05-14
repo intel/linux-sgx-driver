@@ -11,6 +11,11 @@ The Linux SGX software stack is comprised of the Intel(R) SGX driver, the Intel(
 
 The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which will be used until the driver upstreaming process is complete. 
 
+Starting from 05/2017, we are importing the sgx driver code from the in-kernel sgx linux repository from git hub repository:
+https://github.com/jsakkine-intel/linux-sgx.git. This repository includes sgx ring 0 support within the linux kernel.
+The motivation of this decision is to maintain one source for the SGX kernel module either external or in kernel.
+Directory inker2ext includes a script file and a patch file used to migrate the in-kernel code to this repository.
+
 License
 -------
 See License.txt for details.
