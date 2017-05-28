@@ -66,6 +66,7 @@
 #else
 	#include <linux/signal.h>
 #endif
+#include "linux/file.h"
 
 struct page *sgx_get_backing(struct sgx_encl *encl,
 			     struct sgx_encl_page *entry,
