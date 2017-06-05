@@ -73,6 +73,8 @@
 #include <linux/hashtable.h>
 #include <linux/shmem_fs.h>
 
+#define SGX_NR_MOD_CHUNK_PAGES 16
+
 struct sgx_add_page_req {
 	struct sgx_encl *encl;
 	struct sgx_encl_page *encl_page;
@@ -274,6 +276,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req)
 	encl_page->epc_page = epc_page;
 	sgx_test_and_clear_young(encl_page, encl);
 	list_add_tail(&encl_page->load_list, &encl->load_list);
+	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 
 	mutex_unlock(&encl->lock);
 	up_read(&encl->mm->mmap_sem);
@@ -390,7 +393,9 @@ static int sgx_validate_secs(const struct sgx_secs *secs)
 
 static int sgx_init_page(struct sgx_encl *encl,
 			 struct sgx_encl_page *entry,
-			 unsigned long addr)
+			 unsigned long addr,
+			 struct sgx_epc_page **va_src,
+			 bool already_locked)
 {
 	struct sgx_va_page *va_page;
 	struct sgx_epc_page *epc_page = NULL;
@@ -409,10 +414,15 @@ static int sgx_init_page(struct sgx_encl *encl,
 		if (!va_page)
 			return -ENOMEM;
 
-		epc_page = sgx_alloc_page(0);
-		if (IS_ERR(epc_page)) {
-			kfree(va_page);
-			return PTR_ERR(epc_page);
+		if (va_src) {
+			epc_page = *va_src;
+			*va_src = NULL;
+		} else {
+			epc_page = sgx_alloc_page(0);
+			if (IS_ERR(epc_page)) {
+				kfree(va_page);
+				return PTR_ERR(epc_page);
+			}
 		}
 
 		vaddr = sgx_get_page(epc_page);
@@ -437,9 +447,11 @@ static int sgx_init_page(struct sgx_encl *encl,
 		va_page->epc_page = epc_page;
 		va_offset = sgx_alloc_va_slot(va_page);
 
-		mutex_lock(&encl->lock);
+		if (!already_locked)
+			mutex_lock(&encl->lock);
 		list_add(&va_page->list, &encl->va_pages);
-		mutex_unlock(&encl->lock);
+		if (!already_locked)
+			mutex_unlock(&encl->lock);
 	}
 
 	entry->va_page = va_page;
@@ -556,7 +568,7 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 		goto out;
 
 	ret = sgx_init_page(encl, &encl->secs_page,
-			    encl->base + encl->size);
+			    encl->base + encl->size, NULL, false);
 	if (ret)
 		goto out;
 
@@ -592,17 +604,17 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 		goto out;
 	}
 
-	down_read(&current->mm->mmap_sem);
+	down_write(&current->mm->mmap_sem);
 	vma = find_vma(current->mm, secs->base);
 	if (!vma || vma->vm_ops != &sgx_vm_ops ||
 	    vma->vm_start != secs->base ||
 	    vma->vm_end != (secs->base + secs->size)) {
 		ret = -EINVAL;
-		up_read(&current->mm->mmap_sem);
+		up_write(&current->mm->mmap_sem);
 		goto out;
 	}
 	vma->vm_private_data = encl;
-	up_read(&current->mm->mmap_sem);
+	up_write(&current->mm->mmap_sem);
 
 	mutex_lock(&sgx_tgid_ctx_mutex);
 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);
@@ -697,7 +709,7 @@ static int __encl_add_page(struct sgx_encl *encl,
 		}
 	}
 
-	ret = sgx_init_page(encl, encl_page, addp->addr);
+	ret = sgx_init_page(encl, encl_page, addp->addr, NULL, false);
 	if (ret) {
 		__free_page(tmp_page);
 		return -EINVAL;
@@ -930,6 +942,500 @@ out_free_page:
 	return ret;
 }
 
+/**
+ * sgx_augment_encl() - adds a page to an enclave
+ * @addr:	virtual address where the page should be added
+ *
+ * the address is checked against the dynamic ranges defined for
+ * the enclave. If it matches one, a page is added at the
+ * corresponding location
+ *
+ * Note: Invoking function must already hold the encl->lock
+ */
+struct sgx_encl_page *sgx_augment_encl(struct vm_area_struct *vma,
+				       unsigned long addr,
+				       bool write)
+{
+	struct sgx_page_info pginfo;
+	struct sgx_epc_page *epc_page, *va_page = NULL;
+	struct sgx_epc_page *secs_epc_page = NULL;
+	struct sgx_encl_page *encl_page;
+	struct sgx_encl *encl = (struct sgx_encl *) vma->vm_private_data;
+	void *epc_va;
+	void *secs_va;
+	int ret = -EFAULT;
+
+	if (!sgx_has_sgx2)
+		return ERR_PTR(-EFAULT);
+
+	/* if vma area is not writable then we will not eaug */
+	if (unlikely(!(vma->vm_flags & VM_WRITE)))
+		return ERR_PTR(-EFAULT);
+
+	addr &= ~(PAGE_SIZE-1);
+
+	/* Note: Invoking function holds the encl->lock */
+
+	epc_page = sgx_alloc_page(SGX_ALLOC_ATOMIC);
+	if (IS_ERR(epc_page)) {
+		return ERR_PTR(PTR_ERR(epc_page));
+	}
+
+	va_page = sgx_alloc_page(SGX_ALLOC_ATOMIC);
+	if (IS_ERR(va_page)) {
+		sgx_free_page(epc_page, encl);
+		return ERR_PTR(PTR_ERR(va_page));
+	}
+
+	encl_page = kzalloc(sizeof(struct sgx_encl_page), GFP_KERNEL);
+	if (!encl_page) {
+		sgx_free_page(epc_page, encl);
+		sgx_free_page(va_page, encl);
+		return ERR_PTR(-EFAULT);
+	}
+
+	if (!(encl->flags & SGX_ENCL_INITIALIZED))
+		goto out;
+
+	if (encl->flags & SGX_ENCL_DEAD)
+		goto out;
+
+	/*
+	if ((rg->rg_desc.flags & SGX_GROW_DOWN_FLAG) && !write)
+		goto out;
+	*/
+
+	/* Start the augmenting process */
+	ret = sgx_init_page(encl, encl_page, addr, &va_page, true);
+	if (ret)
+		goto out;
+
+	/* If SECS is evicted then reload it first */
+	/* Same steps as in sgx_do_fault */
+	if (encl->flags & SGX_ENCL_SECS_EVICTED) {
+		secs_epc_page = sgx_alloc_page(SGX_ALLOC_ATOMIC);
+		if (IS_ERR(secs_epc_page)) {
+			ret = PTR_ERR(secs_epc_page);
+			secs_epc_page = NULL;
+			goto out;
+		}
+
+		ret = sgx_eldu(encl, &encl->secs_page, secs_epc_page, true);
+		if (ret)
+			goto out;
+
+		encl->secs_page.epc_page = secs_epc_page;
+		encl->flags &= ~SGX_ENCL_SECS_EVICTED;
+
+		/* Do not free */
+		secs_epc_page = NULL;
+	}
+
+	secs_va = sgx_get_page(encl->secs_page.epc_page);
+	epc_va = sgx_get_page(epc_page);
+
+	pginfo.srcpge = 0;
+	pginfo.secinfo = 0;
+	pginfo.linaddr = addr;
+	pginfo.secs = (unsigned long) secs_va;
+
+	ret = __eaug(&pginfo, epc_va);
+	if (ret) {
+		pr_err("sgx: eaug failure with ret=%d\n", ret);
+		goto out;
+	}
+
+	ret = vm_insert_pfn(vma, encl_page->addr, PFN_DOWN(epc_page->pa));
+	sgx_put_page(epc_va);
+	sgx_put_page(secs_va);
+	if (ret) {
+		pr_err("sgx: vm_insert_pfn failure with ret=%d\n", ret);
+		goto out;
+	}
+
+	encl_page->epc_page = epc_page;
+	encl->secs_child_cnt++;
+
+	ret = radix_tree_insert(&encl->page_tree, encl_page->addr >> PAGE_SHIFT,
+			        encl_page);
+	if (ret) {
+		pr_err("sgx: radix_tree_insert failed with ret=%d\n", ret);
+		goto out;
+	}
+	sgx_test_and_clear_young(encl_page, encl);
+
+	list_add_tail(&encl_page->load_list, &encl->load_list);
+	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
+
+	if (va_page)
+		sgx_free_page(va_page, encl);
+	if (secs_epc_page)
+		sgx_free_page(secs_epc_page, encl);
+
+	/*
+	 * Write operation corresponds to stack extension
+	 * In this case the #PF is caused by a write operation,
+	 * most probably a push.
+	 * We return SIGBUS such that the OS invokes the enclave's exception
+	 * handler which will execute eaccept.
+	 */
+	if (write)
+		return ERR_PTR(-EFAULT);
+
+	return encl_page;
+
+out:
+	if (encl_page->va_offset)
+		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
+	sgx_free_page(epc_page, encl);
+	if (va_page)
+		sgx_free_page(va_page, encl);
+	kfree(encl_page);
+	if (secs_epc_page)
+		sgx_free_page(secs_epc_page, encl);
+
+	if ((ret == -EBUSY)||(ret == -ERESTARTSYS))
+		return ERR_PTR(ret);
+
+	return ERR_PTR(-EFAULT);
+}
+
+static int isolate_range(struct sgx_encl *encl,
+			 struct sgx_range *rg, struct list_head *list)
+{
+	unsigned long address, end;
+	struct sgx_encl_page *encl_page;
+	struct vm_area_struct *vma;
+
+	address = rg->start_addr;
+	end = address + rg->nr_pages * PAGE_SIZE;
+
+	vma = sgx_find_vma(encl, address);
+	if (!vma)
+		return -EINVAL;
+
+	for (; address < end; address += PAGE_SIZE) {
+		encl_page = ERR_PTR(-EBUSY);
+		while (encl_page == ERR_PTR(-EBUSY))
+			/* bring back page in case it was evicted */
+			encl_page = sgx_fault_page(vma, address,
+						   SGX_FAULT_RESERVE, NULL);
+
+		if (IS_ERR(encl_page)) {
+			sgx_err(encl, "sgx: No page found at address 0x%lx\n",
+				 address);
+			return PTR_ERR(encl_page);
+		}
+
+		/* We do not need the reserved bit anymore as page
+		 * is removed from the load list
+		 */
+		mutex_lock(&encl->lock);
+		list_move_tail(&encl_page->load_list, list);
+		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
+		mutex_unlock(&encl->lock);
+	}
+
+	return 0;
+}
+
+static int __modify_range(struct sgx_encl *encl,
+			  struct sgx_range *rg, struct sgx_secinfo *secinfo)
+{
+	struct sgx_encl_page *encl_page, *tmp;
+	LIST_HEAD(list);
+	bool emodt = secinfo->flags & (SGX_SECINFO_TRIM | SGX_SECINFO_TCS);
+	unsigned int epoch = 0;
+	void *epc_va;
+	int ret = 0, cnt, status = 0;
+
+	ret = isolate_range(encl, rg, &list);
+	if (ret)
+		goto out;
+
+	if (list_empty(&list))
+		goto out;
+
+	/* EMODT / EMODPR */
+	list_for_each_entry_safe(encl_page, tmp, &list, load_list) {
+		if (!emodt && (encl_page->flags & SGX_ENCL_PAGE_TCS)) {
+			sgx_err(encl, "sgx: illegal request: page at\
+				address=0x%lx is a TCS, req flags=0x%llx\n",
+				encl_page->addr, secinfo->flags);
+			ret = -EINVAL;
+			continue;
+		}
+		mutex_lock(&encl->lock);
+		epc_va = sgx_get_page(encl_page->epc_page);
+		status = SGX_LOCKFAIL;
+		cnt = 0;
+		while (SGX_LOCKFAIL == status && cnt < SGX_EDMM_SPIN_COUNT) {
+			if (emodt) {
+				status = __emodt(secinfo, epc_va);
+				if (!status)
+					encl_page->flags |= SGX_ENCL_PAGE_TCS;
+			} else
+				status = __emodpr(secinfo, epc_va);
+			cnt++;
+		}
+
+		epoch = encl->shadow_epoch;
+		sgx_put_page(epc_va);
+		mutex_unlock(&encl->lock);
+
+		if (status) {
+			sgx_err(encl, "sgx: Page at address=0x%lx \
+				can't be modified err=%d req flags=0x%llx\n",
+				encl_page->addr, status, secinfo->flags);
+			ret = (ret) ? ret : status;
+		} else {
+			if (SGX_SECINFO_TRIM == secinfo->flags)
+				encl_page->flags |= SGX_ENCL_PAGE_TRIM;
+		}
+	}
+
+	/* ETRACK */
+	mutex_lock(&encl->lock);
+	sgx_etrack(encl, epoch);
+	mutex_unlock(&encl->lock);
+
+	smp_call_function(sgx_ipi_cb, NULL, 1);
+
+out:
+	if (!list_empty(&list)) {
+		mutex_lock(&encl->lock);
+		list_splice(&list, &encl->load_list);
+		mutex_unlock(&encl->lock);
+	}
+
+	return ret;
+}
+
+static long modify_range(struct sgx_range *rg, unsigned long flags)
+{
+	struct sgx_encl *encl;
+	struct sgx_secinfo secinfo;
+	struct sgx_range _rg;
+	unsigned long end = rg->start_addr + rg->nr_pages * PAGE_SIZE;
+	int ret = 0;
+
+	if (!sgx_has_sgx2)
+		return -ENOSYS;
+
+	if (rg->start_addr & (PAGE_SIZE - 1))
+		return -EINVAL;
+
+	if (!rg->nr_pages)
+		return -EINVAL;
+
+	ret = sgx_find_and_get_encl(rg->start_addr, &encl);
+	if (ret) {
+		pr_debug("sgx: No enclave found at start addr 0x%lx ret=%d\n",
+			 rg->start_addr, ret);
+		return ret;
+	}
+
+	if (end > encl->base + encl->size) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	memset(&secinfo, 0, sizeof(secinfo));
+	secinfo.flags = flags;
+
+	/*
+	 * Modifying the range by chunks of 16 pages:
+	 * these pages are removed from the load list. Bigger chunks
+	 * may empty EPC load lists and stall SGX.
+	 */
+	for (_rg.start_addr = rg->start_addr;
+	     _rg.start_addr < end;
+	     rg->nr_pages -= SGX_NR_MOD_CHUNK_PAGES,
+	     _rg.start_addr += SGX_NR_MOD_CHUNK_PAGES*PAGE_SIZE) {
+		_rg.nr_pages = rg->nr_pages > 0x10 ? 0x10 : rg->nr_pages;
+		ret = __modify_range(encl, &_rg, &secinfo);
+		if (ret)
+			break;
+	}
+
+out:
+	kref_put(&encl->refcount, sgx_encl_release);
+	return ret;
+}
+
+long sgx_ioc_page_modpr(struct file *filep, unsigned int cmd,
+			unsigned long arg)
+{
+	struct sgx_modification_param *p =
+		(struct sgx_modification_param *) arg;
+
+	/*
+	 * Only RWX flags in mask are allowed
+	 * Restricting WR w/o RD is not allowed
+	 */
+	if (p->flags & ~(SGX_SECINFO_R | SGX_SECINFO_W | SGX_SECINFO_X))
+		return -EINVAL;
+	if (!(p->flags & SGX_SECINFO_R) &&
+	    (p->flags & SGX_SECINFO_W))
+		return -EINVAL;
+	return modify_range(&p->range, p->flags);
+}
+
+/**
+ * sgx_ioc_page_to_tcs() - Pages defined in range are switched to TCS.
+ * These pages should be of type REG.
+ * eaccept need to be invoked after that.
+ * @arg range address of pages to be switched
+ */
+long sgx_ioc_page_to_tcs(struct file *filep, unsigned int cmd,
+			 unsigned long arg)
+{
+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TCS);
+}
+
+/**
+ * sgx_ioc_trim_page() - Pages defined in range are being trimmed.
+ * These pages still belong to the enclave and can not be removed until
+ * eaccept has been invoked
+ * @arg range address of pages to be trimmed
+ */
+long sgx_ioc_trim_page(struct file *filep, unsigned int cmd,
+		       unsigned long arg)
+{
+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TRIM);
+}
+
+static int remove_page(struct sgx_encl *encl, unsigned long address,
+		       bool trim)
+{
+	struct sgx_encl_page *encl_page;
+	struct vm_area_struct *vma;
+	struct sgx_va_page *va_page;
+
+	vma = sgx_find_vma(encl, address);
+	if (!vma)
+		return -EINVAL;
+
+	encl_page = sgx_fault_page(vma, address, SGX_FAULT_RESERVE, NULL);
+	if (IS_ERR(encl_page))
+		return (PTR_ERR(encl_page) == -EBUSY) ? -EBUSY : -EINVAL;
+
+	if (trim && !(encl_page->flags & SGX_ENCL_PAGE_TRIM)) {
+		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
+		return -EINVAL;
+	}
+
+	if (!(encl_page->flags & SGX_ENCL_PAGE_ADDED)) {
+		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
+		return -EINVAL;
+	}
+
+	mutex_lock(&encl->lock);
+
+	radix_tree_delete(&encl->page_tree, encl_page->addr >> PAGE_SHIFT);
+	va_page = encl_page->va_page;
+
+	if (va_page) {
+		sgx_free_va_slot(va_page, encl_page->va_offset);
+
+		if (sgx_va_slots_empty(va_page)) {
+			list_del(&va_page->list);
+			sgx_free_page(va_page->epc_page, encl);
+			kfree(va_page);
+		}
+	}
+
+	if (encl_page->epc_page) {
+		list_del(&encl_page->load_list);
+		zap_vma_ptes(vma, encl_page->addr, PAGE_SIZE);
+		sgx_free_page(encl_page->epc_page, encl);
+		encl->secs_child_cnt--;
+	}
+
+	mutex_unlock(&encl->lock);
+
+	kfree(encl_page);
+
+	return 0;
+}
+
+/**
+ * sgx_ioc_page_notify_accept() - Pages defined in range will be moved to
+ * the trimmed list, i.e. they can be freely removed from now. These pages
+ * should have PT_TRIM page type and should have been eaccepted priorly
+ * @arg range address of pages
+ */
+long sgx_ioc_page_notify_accept(struct file *filep, unsigned int cmd,
+				unsigned long arg)
+{
+	struct sgx_range *rg;
+	unsigned long address, end;
+	struct sgx_encl *encl;
+	int ret, tmp_ret = 0;
+
+	if (!sgx_has_sgx2)
+		return -ENOSYS;
+
+	rg = (struct sgx_range *)arg;
+
+	address = rg->start_addr;
+	address &= ~(PAGE_SIZE-1);
+	end = address + rg->nr_pages * PAGE_SIZE;
+
+	ret = sgx_find_and_get_encl(address, &encl);
+	if (ret) {
+		pr_debug("sgx: No enclave found at start address 0x%lx\n",
+			address);
+		return ret;
+	}
+
+	for (; address < end; address += PAGE_SIZE) {
+		tmp_ret = remove_page(encl, address, true);
+		if (tmp_ret) {
+			sgx_dbg(encl, "sgx: remove failed, addr=0x%lx ret=%d\n",
+				 address, tmp_ret);
+			ret = tmp_ret;
+			continue;
+		}
+	}
+
+	kref_put(&encl->refcount, sgx_encl_release);
+
+	return ret;
+}
+
+
+
+/**
+ * sgx_ioc_page_remove() - Pages defined by address will be removed
+ * @arg address of page
+ */
+long sgx_ioc_page_remove(struct file *filep, unsigned int cmd,
+			 unsigned long arg)
+{
+	struct sgx_encl *encl;
+	unsigned long address = *((unsigned long *) arg);
+	int ret;
+
+	if (!sgx_has_sgx2)
+		return -ENOSYS;
+
+	if (sgx_find_and_get_encl(address, &encl)) {
+		pr_debug("sgx: No enclave found at start address 0x%lx\n",
+			 address);
+		return -EINVAL;
+	}
+
+	ret = remove_page(encl, address, false);
+	if (ret) {
+		pr_debug("sgx: Failed to remove page, address=0x%lx ret=%d\n",
+			  address, ret);
+	}
+
+	kref_put(&encl->refcount, sgx_encl_release);
+	return ret;
+}
+
 typedef long (*sgx_ioc_t)(struct file *filep, unsigned int cmd,
 			  unsigned long arg);
 
@@ -948,6 +1454,21 @@ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	case SGX_IOC_ENCLAVE_INIT:
 		handler = sgx_ioc_enclave_init;
+		break;
+	case SGX_IOC_ENCLAVE_EMODPR:
+		handler = sgx_ioc_page_modpr;
+		break;
+	case SGX_IOC_ENCLAVE_MKTCS:
+		handler = sgx_ioc_page_to_tcs;
+		break;
+	case SGX_IOC_ENCLAVE_TRIM:
+		handler = sgx_ioc_trim_page;
+		break;
+	case SGX_IOC_ENCLAVE_NOTIFY_ACCEPT:
+		handler = sgx_ioc_page_notify_accept;
+		break;
+	case SGX_IOC_ENCLAVE_PAGE_REMOVE:
+		handler = sgx_ioc_page_remove;
 		break;
 	default:
 		return -ENOIOCTLCMD;

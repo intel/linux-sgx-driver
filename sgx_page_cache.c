@@ -242,19 +242,32 @@ static void sgx_eblock(struct sgx_encl *encl,
 
 }
 
-static void sgx_etrack(struct sgx_encl *encl)
+bool sgx_etrack(struct sgx_encl *encl, unsigned int epoch)
 {
 	void *epc;
 	int ret;
+	bool ipi = false;
+
+	/* If someone already called etrack in the meantime */
+	if (epoch < encl->shadow_epoch)
+		return false;
 
 	epc = sgx_get_page(encl->secs_page.epc_page);
 	ret = __etrack(epc);
 	sgx_put_page(epc);
+	encl->shadow_epoch++;
 
-	if (ret) {
+	if (ret == SGX_PREV_TRK_INCMPL) {
+		sgx_dbg(encl, "ETRACK returned %d\n", ret);
+		smp_call_function(sgx_ipi_cb, NULL, 1);
+		BUG_ON(__etrack(epc));
+		ipi = true;
+	} else if (ret) {
 		sgx_crit(encl, "ETRACK returned %d\n", ret);
 		sgx_invalidate(encl, true);
 	}
+
+	return ipi;
 }
 
 static int __sgx_ewb(struct sgx_encl *encl,
@@ -362,7 +375,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
 	}
 
 	/* ETRACK */
-	sgx_etrack(encl);
+	sgx_etrack(encl, encl->shadow_epoch);
 
 	/* EWB */
 	while (!list_empty(src)) {

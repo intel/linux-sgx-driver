@@ -70,7 +70,7 @@
 #include <linux/platform_device.h>
 
 #define DRV_DESCRIPTION "Intel SGX Driver"
-#define DRV_VERSION "0.10"
+#define DRV_VERSION "0.11"
 
 #define ENCL_SIZE_MAX_64 (64ULL * 1024ULL * 1024ULL * 1024ULL)
 #define ENCL_SIZE_MAX_32 (2ULL * 1024ULL * 1024ULL * 1024ULL)

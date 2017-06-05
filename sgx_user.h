@@ -71,6 +71,16 @@
 	_IOW(SGX_MAGIC, 0x01, struct sgx_enclave_add_page)
 #define SGX_IOC_ENCLAVE_INIT \
 	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init)
+#define SGX_IOC_ENCLAVE_EMODPR \
+	_IOW(SGX_MAGIC, 0x09, struct sgx_modification_param)
+#define SGX_IOC_ENCLAVE_MKTCS \
+	_IOW(SGX_MAGIC, 0x0a, struct sgx_range)
+#define SGX_IOC_ENCLAVE_TRIM \
+	_IOW(SGX_MAGIC, 0x0b, struct sgx_range)
+#define SGX_IOC_ENCLAVE_NOTIFY_ACCEPT \
+	_IOW(SGX_MAGIC, 0x0c, struct sgx_range)
+#define SGX_IOC_ENCLAVE_PAGE_REMOVE \
+	_IOW(SGX_MAGIC, 0x0d, unsigned long)
 
 /* SGX leaf instruction return values */
 #define SGX_SUCCESS			0
@@ -92,6 +102,7 @@
 #define SGX_INVALID_LICENSE		16
 #define SGX_PREV_TRK_INCMPL		17
 #define SGX_PG_IS_SECS			18
+#define SGX_PAGE_NOT_MODIFIABLE		20
 #define SGX_INVALID_CPUSVN		32
 #define SGX_INVALID_ISVSVN		64
 #define SGX_UNMASKED_EVENT		128
@@ -141,5 +152,23 @@ struct sgx_enclave_init {
 struct sgx_enclave_destroy {
 	__u64	addr;
 } __packed;
+
+
+/*
+ *     SGX2.0 definitions
+ */
+
+#define SGX_GROW_UP_FLAG	1
+#define SGX_GROW_DOWN_FLAG	2
+
+struct sgx_range {
+	unsigned long start_addr;
+	unsigned int nr_pages;
+};
+
+struct sgx_modification_param {
+	struct sgx_range range;
+	unsigned long flags;
+};
 
 #endif /* _UAPI_ASM_X86_SGX_H */

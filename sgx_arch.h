@@ -81,6 +81,7 @@ enum sgx_secinfo_flags {
 	SGX_SECINFO_SECS	= 0x000ULL,
 	SGX_SECINFO_TCS		= 0x100ULL,
 	SGX_SECINFO_REG		= 0x200ULL,
+	SGX_SECINFO_TRIM	= 0x400ULL,
 };
 
 struct sgx_secinfo {
@@ -105,7 +106,7 @@ enum isgx_secs_attributes {
 					   GENMASK_ULL(63, 6)),
 };
 
-#define SGX_SECS_RESERVED1_SIZE 28
+#define SGX_SECS_RESERVED1_SIZE 24
 #define SGX_SECS_RESERVED2_SIZE 32
 #define SGX_SECS_RESERVED3_SIZE 96
 #define SGX_SECS_RESERVED4_SIZE 3836
@@ -114,6 +115,7 @@ struct sgx_secs {
 	u64	size;
 	u64	base;
 	u32	ssaframesize;
+	u32	misc_select;
 	uint8_t reserved1[SGX_SECS_RESERVED1_SIZE];
 	u64	flags;
 	u64	xfrm;
@@ -338,6 +340,7 @@ static inline int __emodt(struct sgx_secinfo *secinfo, void *epc)
 
 	return __encls_ret(EMODT, secinfo, epc, rdx);
 }
+
 
 struct sgx_encl;
 

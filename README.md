@@ -19,6 +19,7 @@ Contributing
 -------
 Starting from 05/2017, we are importing the sgx driver code from the in-kernel sgx repository located at git-hub: https://github.com/jsakkine-intel/linux-sgx.git. Any contribution should be done there. Future versions of the sgx driver code will be imported later on. The motivation behind this decision is to maintain a single source code of the sgx linux driver.
 An additional directory inker2ext/ has been created, it contains a script and a patch file that can be used in order to separately generate the code base of the sgx external module; it can be used in case someone wants the newest sgx driver as an external module and does not want to wait for next update.
+The sgx2 branch hosts an initial implementation supporting SGX 2.0. This patch is maintained in inker2ext/sgx2.patch in the 2.0 branch and will be periodically updated to the linux-sgx-driver:master branch. Contributions for this patch should be managed directly through the linux-sgx-driver project on Github. sgx2 will have the same behavior as linux-sgx-driver on hardware platforms that do not support SGX 2.0.
 
 Documentation
 -------------
@@ -31,7 +32,7 @@ Build and Install the Intel(R) SGX Driver
 ### Prerequisites
 - Ensure that you have the following required operating systems:  
   * Ubuntu* Desktop-16.04-LTS 64bits
-  * Red Hat Enterprise Linux Server release 7.2 64bits
+  * Red Hat Enterprise Linux Server release 7.3 64bits
   * CentOS 7.3.1611 64bits
 - Ensure that you have the following required hardware:  
   * 6th Generation Intel(R) Core(TM) Processor (code named Skylake)
