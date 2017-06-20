@@ -202,9 +202,9 @@ static int sgx_init_platform(void)
 	cpuid_count(SGX_CPUID, 0x0, &eax, &ebx, &ecx, &edx);
 	if (edx & 0xFFFF) {
 #ifdef CONFIG_X86_64
-		sgx_encl_size_max_64 = 1ULL << (edx & 0xFF);
+		sgx_encl_size_max_64 = 1ULL << ((edx >> 8) & 0xFF);
 #endif
-		sgx_encl_size_max_32 = 1ULL << ((edx >> 8) & 0xFF);
+		sgx_encl_size_max_32 = 1ULL << (edx & 0xFF);
 	}
 
 	sgx_nr_epc_banks = 0;
