@@ -329,6 +329,8 @@ out_iounmap:
 	return ret;
 }
 
+static atomic_t sgx_init_flag = ATOMIC_INIT(0);
+
 static int sgx_drv_probe(struct platform_device *pdev)
 {
 	unsigned int eax, ebx, ecx, edx;
@@ -336,6 +338,11 @@ static int sgx_drv_probe(struct platform_device *pdev)
 
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
 		return -ENODEV;
+
+	if (atomic_cmpxchg(&sgx_init_flag, 0, 1)) {
+		pr_warn("intel_sgx: second initialization call skipped\n");
+		return 0;
+	}
 
 	cpuid(0, &eax, &ebx, &ecx, &edx);
 	if (eax < SGX_CPUID) {
@@ -383,6 +390,11 @@ static int sgx_drv_remove(struct platform_device *pdev)
 {
 	int i;
 
+	if (!atomic_cmpxchg(&sgx_init_flag, 1, 0)) {
+		pr_warn("intel_sgx: second release call skipped\n");
+		return 0;
+	}
+
 	misc_deregister(&sgx_dev);
 	destroy_workqueue(sgx_add_page_wq);
 #ifdef CONFIG_X86_64
@@ -412,7 +424,7 @@ static struct platform_driver sgx_drv = {
 	},
 };
 
-#if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 10, 0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
 module_platform_driver(sgx_drv);
 #else
 static struct platform_device *pdev;
