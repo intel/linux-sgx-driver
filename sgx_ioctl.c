@@ -224,7 +224,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req)
 	struct vm_area_struct *vma;
 	int ret;
 
-	epc_page = sgx_alloc_page(0);
+	epc_page = sgx_alloc_page(encl, 0);
 	if (IS_ERR(epc_page))
 		return false;
 
@@ -409,7 +409,7 @@ static int sgx_init_page(struct sgx_encl *encl,
 		if (!va_page)
 			return -ENOMEM;
 
-		epc_page = sgx_alloc_page(0);
+		epc_page = sgx_alloc_page(encl, 0);
 		if (IS_ERR(epc_page)) {
 			kfree(va_page);
 			return PTR_ERR(epc_page);
@@ -542,7 +542,7 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 	encl->backing = backing;
 	encl->pcmd = pcmd;
 
-	secs_epc = sgx_alloc_page(0);
+	secs_epc = sgx_alloc_page(NULL,0);
 	if (IS_ERR(secs_epc)) {
 		ret = PTR_ERR(secs_epc);
 		secs_epc = NULL;

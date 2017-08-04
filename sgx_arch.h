@@ -346,7 +346,7 @@ struct sgx_epc_page {
 	struct list_head free_list;
 };
 
-extern struct sgx_epc_page *sgx_alloc_page(unsigned int flags);
+extern struct sgx_epc_page *sgx_alloc_page(struct sgx_encl *encl, unsigned int flags);
 extern int sgx_free_page(struct sgx_epc_page *entry, struct sgx_encl *encl);
 extern void *sgx_get_page(struct sgx_epc_page *entry);
 extern void sgx_put_page(void *epc_page_vaddr);

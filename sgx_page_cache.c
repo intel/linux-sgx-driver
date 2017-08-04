@@ -501,7 +501,7 @@ static struct sgx_epc_page *sgx_alloc_page_fast(void)
  *
  * Return: an EPC page or a system error code
  */
-struct sgx_epc_page *sgx_alloc_page(unsigned int flags)
+struct sgx_epc_page *sgx_alloc_page(struct sgx_encl *encl, unsigned int flags)
 {
 	struct sgx_epc_page *entry;
 
@@ -513,6 +513,13 @@ struct sgx_epc_page *sgx_alloc_page(unsigned int flags)
 		if (flags & SGX_ALLOC_ATOMIC) {
 			entry = ERR_PTR(-EBUSY);
 			break;
+		}
+
+		if (encl) {
+			if (encl->flags & SGX_ENCL_DEAD) {
+				entry = ERR_PTR(-ENOMEM);
+				break;
+			}
 		}
 
 		if (signal_pending(current)) {
