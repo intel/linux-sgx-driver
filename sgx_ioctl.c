@@ -585,6 +585,8 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 	encl->mmu_notifier.ops = &sgx_mmu_notifier_ops;
 	ret = mmu_notifier_register(&encl->mmu_notifier, encl->mm);
 	if (ret) {
+		if (ret == -EINTR)
+			ret = -ERESTARTSYS;
 		encl->mmu_notifier.ops = NULL;
 		goto out;
 	}
@@ -846,7 +848,7 @@ static int __sgx_encl_init(struct sgx_encl *encl, char *sigstruct,
 
 		msleep_interruptible(SGX_EINIT_SLEEP_TIME);
 		if (signal_pending(current))
-			return -EINTR;
+			return -ERESTARTSYS;
 	}
 
 out:
