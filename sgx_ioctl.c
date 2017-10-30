@@ -549,6 +549,8 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 		goto out;
 	}
 
+	encl->secs_page.epc_page = secs_epc;
+
 	ret = sgx_add_to_tgid_ctx(encl);
 	if (ret)
 		goto out;
@@ -575,7 +577,6 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
 		goto out;
 	}
 
-	encl->secs_page.epc_page = secs_epc;
 	createp->src = (unsigned long)encl->base;
 
 	if (secs->flags & SGX_SECS_A_DEBUG)
