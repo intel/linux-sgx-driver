@@ -170,6 +170,9 @@ static int sgx_init_platform(void)
 	unsigned long size;
 	int i;
 
+	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
+		return -ENODEV;
+
 	cpuid(0, &eax, &ebx, &ecx, &edx);
 	if (eax < SGX_CPUID) {
 		pr_err("intel_sgx: CPUID is missing the SGX leaf instruction\n");
@@ -186,6 +189,8 @@ static int sgx_init_platform(void)
 		pr_err("intel_sgx: CPU does not support the SGX 1.0 instruction set\n");
 		return -ENODEV;
 	}
+
+	sgx_has_sgx2 = (eax & 2) != 0;
 
 	if (boot_cpu_has(X86_FEATURE_OSXSAVE)) {
 		cpuid_count(SGX_CPUID, 0x1, &eax, &ebx, &ecx, &edx);
@@ -271,9 +276,6 @@ static int sgx_dev_init(struct device *dev)
 
 	pr_info("intel_sgx: " DRV_DESCRIPTION " v" DRV_VERSION "\n");
 
-	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
-		return -ENODEV;
-
 	ret = sgx_init_platform();
 	if (ret)
 		return ret;
@@ -333,54 +335,9 @@ static atomic_t sgx_init_flag = ATOMIC_INIT(0);
 
 static int sgx_drv_probe(struct platform_device *pdev)
 {
-	unsigned int eax, ebx, ecx, edx;
-	int i;
-
-	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
-		return -ENODEV;
-
 	if (atomic_cmpxchg(&sgx_init_flag, 0, 1)) {
 		pr_warn("intel_sgx: second initialization call skipped\n");
 		return 0;
-	}
-
-	cpuid(0, &eax, &ebx, &ecx, &edx);
-	if (eax < SGX_CPUID) {
-		pr_err("intel_sgx: CPUID is missing the SGX leaf instruction\n");
-		return -ENODEV;
-	}
-
-	if (!boot_cpu_has(X86_FEATURE_SGX)) {
-		pr_err("intel_sgx: CPU is missing the SGX feature\n");
-		return -ENODEV;
-	}
-
-	cpuid_count(SGX_CPUID, 0x0, &eax, &ebx, &ecx, &edx);
-	if (!(eax & 1)) {
-		pr_err("intel_sgx: CPU does not support the SGX 1.0 instruction set\n");
-		return -ENODEV;
-	}
-
-	sgx_has_sgx2 = (eax & 2) != 0;
-
-	if (boot_cpu_has(X86_FEATURE_OSXSAVE)) {
-		cpuid_count(SGX_CPUID, 0x1, &eax, &ebx, &ecx, &edx);
-		sgx_xfrm_mask = (((u64)edx) << 32) + (u64)ecx;
-		for (i = 2; i < 64; i++) {
-			cpuid_count(0x0D, i, &eax, &ebx, &ecx, &edx);
-			if ((1 << i) & sgx_xfrm_mask)
-				sgx_ssaframesize_tbl[i] =
-					(168 + eax + ebx + PAGE_SIZE - 1) /
-					PAGE_SIZE;
-		}
-	}
-
-	cpuid_count(SGX_CPUID, 0x0, &eax, &ebx, &ecx, &edx);
-	if (edx & 0xFFFF) {
-#ifdef CONFIG_X86_64
-		sgx_encl_size_max_64 = 2ULL << (edx & 0xFF);
-#endif
-		sgx_encl_size_max_32 = 2ULL << ((edx >> 8) & 0xFF);
 	}
 
 	return sgx_dev_init(&pdev->dev);
