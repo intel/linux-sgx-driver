@@ -219,8 +219,6 @@ static int sgx_init_platform(void)
 				(u64) (ecx & 0xfffff000);
 			sgx_epc_banks[sgx_nr_epc_banks].end =
 				sgx_epc_banks[sgx_nr_epc_banks].start + size;
-			if (!sgx_epc_banks[sgx_nr_epc_banks].start)
-				return -ENODEV;
 			sgx_nr_epc_banks++;
 		} else {
 			break;
