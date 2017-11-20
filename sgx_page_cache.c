@@ -434,6 +434,9 @@ int sgx_page_cache_init(void)
 
 	sgx_nr_high_pages = 2 * sgx_nr_low_pages;
 
+	if (ksgxswapd_tsk)
+		return 0;
+
 	tmp = kthread_run(ksgxswapd, NULL, "ksgxswapd");
 	if (!IS_ERR(tmp))
 		ksgxswapd_tsk = tmp;
