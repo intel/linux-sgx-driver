@@ -72,14 +72,9 @@
 static void sgx_vma_open(struct vm_area_struct *vma)
 {
 	struct sgx_encl *encl = vma->vm_private_data;
+
 	if (!encl)
 		return;
-
-	/* protect from fork */
-	if (encl->mm != current->mm) {
-		vma->vm_private_data = NULL;
-		return;
-	}
 
 	/* kref cannot underflow because ECREATE ioctl checks that there is only
 	 * one single VMA for the enclave before proceeding.
@@ -90,11 +85,13 @@ static void sgx_vma_open(struct vm_area_struct *vma)
 static void sgx_vma_close(struct vm_area_struct *vma)
 {
 	struct sgx_encl *encl = vma->vm_private_data;
+
 	if (!encl)
 		return;
 
 	mutex_lock(&encl->lock);
 	zap_vma_ptes(vma, vma->vm_start, vma->vm_end - vma->vm_start);
+	encl->flags |= SGX_ENCL_DEAD;
 	mutex_unlock(&encl->lock);
 	kref_put(&encl->refcount, sgx_encl_release);
 }
@@ -116,7 +113,7 @@ static int sgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 #endif
 	struct sgx_encl_page *entry;
 
-	entry = sgx_fault_page(vma, addr, 0, vmf);
+	entry = sgx_fault_page(vma, addr, 0);
 
 	if (!IS_ERR(entry) || PTR_ERR(entry) == -EBUSY)
 		return VM_FAULT_NOPAGE;
@@ -215,7 +212,7 @@ static int sgx_vma_access(struct vm_area_struct *vma, unsigned long addr,
 				entry->flags &= ~SGX_ENCL_PAGE_RESERVED;
 
 			entry = sgx_fault_page(vma, (addr + i) & PAGE_MASK,
-					       SGX_FAULT_RESERVE, NULL);
+					       SGX_FAULT_RESERVE);
 			if (IS_ERR(entry)) {
 				ret = PTR_ERR(entry);
 				entry = NULL;
