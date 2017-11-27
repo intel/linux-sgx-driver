@@ -5,7 +5,8 @@ ifneq ($(KERNELRELEASE),)
 		sgx_ioctl.o \
 		sgx_vma.o \
 		sgx_util.o\
-		sgx_encl.o
+		sgx_encl.o \
+		sgx_encl2.o
 	obj-m += isgx.o
 else
 KDIR := /lib/modules/$(shell uname -r)/build

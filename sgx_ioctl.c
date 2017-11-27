@@ -73,7 +73,7 @@
 #include <linux/hashtable.h>
 #include <linux/shmem_fs.h>
 
-static int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
+int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 {
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
@@ -251,6 +251,123 @@ out:
 	return ret;
 }
 
+long sgx_ioc_page_modpr(struct file *filep, unsigned int cmd,
+			unsigned long arg)
+{
+	struct sgx_modification_param *p =
+		(struct sgx_modification_param *) arg;
+
+	/*
+	 * Only RWX flags in mask are allowed
+	 * Restricting WR w/o RD is not allowed
+	 */
+	if (p->flags & ~(SGX_SECINFO_R | SGX_SECINFO_W | SGX_SECINFO_X))
+		return -EINVAL;
+	if (!(p->flags & SGX_SECINFO_R) &&
+	    (p->flags & SGX_SECINFO_W))
+		return -EINVAL;
+	return modify_range(&p->range, p->flags);
+}
+
+/**
+ * sgx_ioc_page_to_tcs() - Pages defined in range are switched to TCS.
+ * These pages should be of type REG.
+ * eaccept needs to be invoked after return.
+ * @arg range address of pages to be switched
+ */
+long sgx_ioc_page_to_tcs(struct file *filep, unsigned int cmd,
+			 unsigned long arg)
+{
+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TCS);
+}
+
+/**
+ * sgx_ioc_trim_page() - Pages defined in range are being trimmed.
+ * These pages still belong to the enclave and can not be removed until
+ * eaccept has been invoked
+ * @arg range address of pages to be trimmed
+ */
+long sgx_ioc_trim_page(struct file *filep, unsigned int cmd,
+		       unsigned long arg)
+{
+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TRIM);
+}
+
+/**
+ * sgx_ioc_page_notify_accept() - Pages defined in range will be moved to
+ * the trimmed list, i.e. they can be freely removed from now. These pages
+ * should have PT_TRIM page type and should have been eaccepted priorly
+ * @arg range address of pages
+ */
+long sgx_ioc_page_notify_accept(struct file *filep, unsigned int cmd,
+				unsigned long arg)
+{
+	struct sgx_range *rg;
+	unsigned long address, end;
+	struct sgx_encl *encl;
+	int ret, tmp_ret = 0;
+
+	if (!sgx_has_sgx2)
+		return -ENOSYS;
+
+	rg = (struct sgx_range *)arg;
+
+	address = rg->start_addr;
+	address &= ~(PAGE_SIZE-1);
+	end = address + rg->nr_pages * PAGE_SIZE;
+
+	ret = sgx_get_encl(address, &encl);
+	if (ret) {
+		pr_warn("sgx: No enclave found at start address 0x%lx\n",
+			address);
+		return ret;
+	}
+
+	for (; address < end; address += PAGE_SIZE) {
+		tmp_ret = remove_page(encl, address, true);
+		if (tmp_ret) {
+			sgx_dbg(encl, "sgx: remove failed, addr=0x%lx ret=%d\n",
+				 address, tmp_ret);
+			ret = tmp_ret;
+			continue;
+		}
+	}
+
+	kref_put(&encl->refcount, sgx_encl_release);
+
+	return ret;
+}
+
+/**
+ * sgx_ioc_page_remove() - Pages defined by address will be removed
+ * @arg address of page
+ */
+long sgx_ioc_page_remove(struct file *filep, unsigned int cmd,
+			 unsigned long arg)
+{
+	struct sgx_encl *encl;
+	unsigned long address = *((unsigned long *) arg);
+	int ret;
+
+	if (!sgx_has_sgx2)
+		return -ENOSYS;
+
+	if (sgx_get_encl(address, &encl)) {
+		pr_warn("sgx: No enclave found at start address 0x%lx\n",
+			address);
+		return -EINVAL;
+	}
+
+	ret = remove_page(encl, address, false);
+	if (ret) {
+		pr_warn("sgx: Failed to remove page, address=0x%lx ret=%d\n",
+			address, ret);
+	}
+
+	kref_put(&encl->refcount, sgx_encl_release);
+	return ret;
+}
+
 typedef long (*sgx_ioc_t)(struct file *filep, unsigned int cmd,
 			  unsigned long arg);
 
@@ -269,6 +386,21 @@ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 	case SGX_IOC_ENCLAVE_INIT:
 		handler = sgx_ioc_enclave_init;
+		break;
+	case SGX_IOC_ENCLAVE_EMODPR:
+		handler = sgx_ioc_page_modpr;
+		break;
+	case SGX_IOC_ENCLAVE_MKTCS:
+		handler = sgx_ioc_page_to_tcs;
+		break;
+	case SGX_IOC_ENCLAVE_TRIM:
+		handler = sgx_ioc_trim_page;
+		break;
+	case SGX_IOC_ENCLAVE_NOTIFY_ACCEPT:
+		handler = sgx_ioc_page_notify_accept;
+		break;
+	case SGX_IOC_ENCLAVE_PAGE_REMOVE:
+		handler = sgx_ioc_page_remove;
 		break;
 	default:
 		return -ENOIOCTLCMD;

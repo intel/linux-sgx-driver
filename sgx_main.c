@@ -71,7 +71,7 @@
 #include <linux/platform_device.h>
 
 #define DRV_DESCRIPTION "Intel SGX Driver"
-#define DRV_VERSION "0.10"
+#define DRV_VERSION "0.11"
 
 MODULE_DESCRIPTION(DRV_DESCRIPTION);
 MODULE_AUTHOR("Jarkko Sakkinen <jarkko.sakkinen@linux.intel.com>");
@@ -95,6 +95,7 @@ u64 sgx_encl_size_max_64;
 u64 sgx_xfrm_mask = 0x3;
 u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
+bool sgx_has_sgx2;
 
 #ifdef CONFIG_COMPAT
 long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
@@ -324,6 +325,8 @@ static int sgx_drv_probe(struct platform_device *pdev)
 		pr_err("intel_sgx: CPU does not support the SGX1 instructions\n");
 		return -ENODEV;
 	}
+
+	sgx_has_sgx2 = (eax & 2) != 0;
 
 	return sgx_dev_init(&pdev->dev);
 }

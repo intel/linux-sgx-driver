@@ -335,7 +335,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
 	}
 
 	/* ETRACK */
-	sgx_etrack(encl);
+	sgx_etrack(encl, encl->shadow_epoch);
 
 	/* EWB */
 	while (!list_empty(src)) {

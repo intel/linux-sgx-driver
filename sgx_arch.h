@@ -139,6 +139,7 @@ enum sgx_page_type {
 	SGX_PAGE_TYPE_TCS	= 0x01,
 	SGX_PAGE_TYPE_REG	= 0x02,
 	SGX_PAGE_TYPE_VA	= 0x03,
+	SGX_PAGE_TYPE_TRIM	= 0x04,
 };
 
 enum sgx_secinfo_flags {
@@ -148,6 +149,7 @@ enum sgx_secinfo_flags {
 	SGX_SECINFO_SECS	= (SGX_PAGE_TYPE_SECS << 8),
 	SGX_SECINFO_TCS		= (SGX_PAGE_TYPE_TCS << 8),
 	SGX_SECINFO_REG		= (SGX_PAGE_TYPE_REG << 8),
+	SGX_SECINFO_TRIM	= (SGX_PAGE_TYPE_TRIM << 8),
 };
 
 struct sgx_secinfo {
