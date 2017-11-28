@@ -56,6 +56,17 @@ $ make
 ```
 You can find the driver *isgx.ko* generated in the same directory.
 
+**Note:** In order to build the driver you need the kernel headers to be installed on your machine.
+On CentOS operating system, you get those using: "sudo yum groupinstall  'Development Tools'".
+Those header files are then located at: /usr/src/kernel/<kernel version> (the <kernel version> can be identified
+using the command: 'uname -r'). For some reason and some CentOS versions, those headers are copied in a
+different directory than /usr/src/kernel/`uname -r`. If this happens, then the driver build will fail.
+
+A way to overcome this problem is to download those header files by searching on the web for:
+"centos kernel header <your kernel version>". You should then find an rpm file from from https://centos.pkg.org.
+Download and then open it at the right location: /usr/src/kernel/<kernel version>.
+The 'make' command should then work properly.
+
 ### Install the Intel(R) SGX Driver
 To install the Intel(R) SGX driver, enter the following command with root privilege:
 ```
