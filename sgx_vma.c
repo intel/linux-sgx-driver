@@ -72,6 +72,7 @@
 static void sgx_vma_open(struct vm_area_struct *vma)
 {
 	struct sgx_encl *encl = vma->vm_private_data;
+
 	if (!encl)
 		return;
 
@@ -90,11 +91,13 @@ static void sgx_vma_open(struct vm_area_struct *vma)
 static void sgx_vma_close(struct vm_area_struct *vma)
 {
 	struct sgx_encl *encl = vma->vm_private_data;
+
 	if (!encl)
 		return;
 
 	mutex_lock(&encl->lock);
 	zap_vma_ptes(vma, vma->vm_start, vma->vm_end - vma->vm_start);
+	encl->flags |= SGX_ENCL_DEAD;
 	mutex_unlock(&encl->lock);
 	kref_put(&encl->refcount, sgx_encl_release);
 }

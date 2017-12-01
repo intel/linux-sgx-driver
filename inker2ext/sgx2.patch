@@ -1,7 +1,10 @@
-From 24bd0ac2c443438695de82e446833e9b0a060b6f Mon Sep 17 00:00:00 2001
+From fc0cb151466bc6197506ab7e6dc5e3f516ca8d7a Mon Sep 17 00:00:00 2001
 From: Angie Chinchilla <angie.v.chinchilla@intel.com>
-Date: Mon, 5 Jun 2017 11:08:18 -0400
+Date: Mon, 27 Nov 2017 00:15:00 -0500
 Subject: [PATCH] SGX 2.0 Implementation
+
+Rebased 2.0 patch applies to linux-sgx-driver:master
+commit-id 03435d33de0bcca6c5777f23ac161249b9158f1e
 
 Authors:
 Serge Ayoun <serge.ayoun@intel.com>
@@ -11,59 +14,45 @@ Cedric Xing <cedric.xing@intel.com>
 
 Signed-off-by: Angie Chinchilla <angie.v.chinchilla@intel.com>
 ---
- Makefile         |   2 +-
- README.md        |   3 +-
- sgx.h            |  28 ++-
- sgx_arch.h       |   5 +-
- sgx_ioctl.c      | 545 +++++++++++++++++++++++++++++++++++++++++++++++++++++--
- sgx_main.c       |   2 +-
- sgx_page_cache.c |  21 ++-
- sgx_user.h       |  29 +++
- sgx_util.c       |  28 ++-
- sgx_vma.c        |  11 +-
- 10 files changed, 642 insertions(+), 32 deletions(-)
+ Makefile         |   3 +-
+ sgx.h            |  29 +++-
+ sgx_arch.h       |   2 +
+ sgx_encl.c       |  30 ++--
+ sgx_encl2.c      | 446 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ sgx_ioctl.c      | 134 ++++++++++++++++-
+ sgx_main.c       |   5 +-
+ sgx_page_cache.c |   2 +-
+ sgx_user.h       |  25 ++++
+ sgx_util.c       |  40 +++--
+ sgx_vma.c        |  10 +-
+ 11 files changed, 698 insertions(+), 28 deletions(-)
+ create mode 100644 sgx_encl2.c
 
 diff --git a/Makefile b/Makefile
-index 896d397..11f2927 100644
+index 4b5edaf..c88f38c 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -20,4 +20,4 @@ install: default
- endif
- 
- clean:
--	rm -vrf *.o *.ko *.order *.symvers *.mod.c .tmp_versions .*o.cmd
-+	rm -vrf *.o *.ko *.order *.symvers *.mod.c .tmp_versions .*o.cmd .*.o.d
-diff --git a/README.md b/README.md
-index a8b2b04..61946c4 100644
---- a/README.md
-+++ b/README.md
-@@ -19,6 +19,7 @@ Contributing
- -------
- Starting from 05/2017, we are importing the sgx driver code from the in-kernel sgx repository located at git-hub: https://github.com/jsakkine-intel/linux-sgx.git. Any contribution should be done there. Future versions of the sgx driver code will be imported later on. The motivation behind this decision is to maintain a single source code of the sgx linux driver.
- An additional directory inker2ext/ has been created, it contains a script and a patch file that can be used in order to separately generate the code base of the sgx external module; it can be used in case someone wants the newest sgx driver as an external module and does not want to wait for next update.
-+The sgx2 branch hosts an initial implementation supporting SGX 2.0. This patch is maintained in inker2ext/sgx2.patch in the 2.0 branch and will be periodically updated to the linux-sgx-driver:master branch. Contributions for this patch should be managed directly through the linux-sgx-driver project on Github. sgx2 will have the same behavior as linux-sgx-driver on hardware platforms that do not support SGX 2.0.
- 
- Documentation
- -------------
-@@ -31,7 +32,7 @@ Build and Install the Intel(R) SGX Driver
- ### Prerequisites
- - Ensure that you have the following required operating systems:  
-   * Ubuntu* Desktop-16.04-LTS 64bits
--  * Red Hat Enterprise Linux Server release 7.2 64bits
-+  * Red Hat Enterprise Linux Server release 7.3 64bits
-   * CentOS 7.3.1611 64bits
- - Ensure that you have the following required hardware:  
-   * 6th Generation Intel(R) Core(TM) Processor (code named Skylake)
+@@ -5,7 +5,8 @@ ifneq ($(KERNELRELEASE),)
+ 		sgx_ioctl.o \
+ 		sgx_vma.o \
+ 		sgx_util.o\
+-		sgx_encl.o
++		sgx_encl.o \
++		sgx_encl2.o
+ 	obj-m += isgx.o
+ else
+ KDIR := /lib/modules/$(shell uname -r)/build
 diff --git a/sgx.h b/sgx.h
-index 01dcfb3..0dae86c 100644
+index bfc24c0..46dfc0f 100644
 --- a/sgx.h
 +++ b/sgx.h
-@@ -69,11 +69,13 @@
+@@ -69,12 +69,14 @@
  #include <linux/workqueue.h>
  #include <linux/mmu_notifier.h>
  #include <linux/radix-tree.h>
 +#include <linux/mm.h>
  #include "sgx_arch.h"
+ #include "sgx_user.h"
  
  #define SGX_EINIT_SPIN_COUNT	20
  #define SGX_EINIT_SLEEP_COUNT	50
@@ -72,7 +61,7 @@ index 01dcfb3..0dae86c 100644
  
  #define SGX_VA_SLOT_COUNT 512
  
-@@ -99,9 +101,21 @@ static inline void sgx_free_va_slot(struct sgx_va_page *page,
+@@ -110,9 +112,21 @@ static inline void sgx_free_va_slot(struct sgx_va_page *page,
  	clear_bit(offset >> 3, page->slots);
  }
  
@@ -94,7 +83,7 @@ index 01dcfb3..0dae86c 100644
  };
  
  struct sgx_encl_page {
-@@ -147,6 +161,7 @@ struct sgx_encl {
+@@ -160,6 +174,7 @@ struct sgx_encl {
  	struct sgx_tgid_ctx *tgid_ctx;
  	struct list_head encl_list;
  	struct mmu_notifier mmu_notifier;
@@ -102,7 +91,24 @@ index 01dcfb3..0dae86c 100644
  };
  
  struct sgx_epc_bank {
-@@ -210,11 +225,22 @@ enum sgx_fault_flags {
+@@ -178,6 +193,7 @@ extern u64 sgx_encl_size_max_64;
+ extern u64 sgx_xfrm_mask;
+ extern u32 sgx_misc_reserved;
+ extern u32 sgx_xsave_size_tbl[64];
++extern bool sgx_has_sgx2;
+ 
+ extern const struct vm_operations_struct sgx_vm_ops;
+ 
+@@ -205,6 +221,8 @@ int sgx_encl_add_page(struct sgx_encl *encl, unsigned long addr, void *data,
+ 		      struct sgx_secinfo *secinfo, unsigned int mrmask);
+ int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
+ 		  struct sgx_einittoken *einittoken);
++struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
++				       unsigned long addr, bool write);
+ void sgx_encl_release(struct kref *ref);
+ 
+ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
+@@ -234,7 +252,8 @@ enum sgx_fault_flags {
  
  struct sgx_encl_page *sgx_fault_page(struct vm_area_struct *vma,
  				     unsigned long addr,
@@ -110,96 +116,71 @@ index 01dcfb3..0dae86c 100644
 +				     unsigned int flags,
 +				     struct vm_fault *vmf);
  
- void sgx_encl_release(struct kref *ref);
- void sgx_tgid_ctx_release(struct kref *ref);
  
-+void sgx_ipi_cb(void *info);
-+bool sgx_etrack(struct sgx_encl *encl, unsigned int epoch);
-+struct sgx_encl_page *sgx_augment_encl(struct vm_area_struct *vma,
-+				       unsigned long addr,
-+				       bool write);
-+int sgx_eldu(struct sgx_encl *encl,
-+	     struct sgx_encl_page *encl_page,
-+	     struct sgx_epc_page *epc_page,
-+	     bool is_secs);
-+
  extern struct mutex sgx_tgid_ctx_mutex;
- extern struct list_head sgx_tgid_ctx_list;
- extern struct task_struct *ksgxswapd_tsk;
+@@ -249,6 +268,12 @@ void sgx_free_page(struct sgx_epc_page *entry, struct sgx_encl *encl);
+ void *sgx_get_page(struct sgx_epc_page *entry);
+ void sgx_put_page(void *epc_page_vaddr);
+ void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page);
+-void sgx_etrack(struct sgx_encl *encl);
++void sgx_etrack(struct sgx_encl *encl, unsigned int epoch);
++void sgx_ipi_cb(void *info);
++int sgx_eldu(struct sgx_encl *encl, struct sgx_encl_page *encl_page,
++	     struct sgx_epc_page *epc_page, bool is_secs);
++long modify_range(struct sgx_range *rg, unsigned long flags);
++int remove_page(struct sgx_encl *encl, unsigned long address, bool trim);
++int sgx_get_encl(unsigned long addr, struct sgx_encl **encl);
+ 
+ #endif /* __ARCH_X86_INTEL_SGX_H__ */
 diff --git a/sgx_arch.h b/sgx_arch.h
-index 233d3a6..6d2fea9 100644
+index dcb620e..a609fd6 100644
 --- a/sgx_arch.h
 +++ b/sgx_arch.h
-@@ -81,6 +81,7 @@ enum sgx_secinfo_flags {
- 	SGX_SECINFO_SECS	= 0x000ULL,
- 	SGX_SECINFO_TCS		= 0x100ULL,
- 	SGX_SECINFO_REG		= 0x200ULL,
-+	SGX_SECINFO_TRIM	= 0x400ULL,
+@@ -139,6 +139,7 @@ enum sgx_page_type {
+ 	SGX_PAGE_TYPE_TCS	= 0x01,
+ 	SGX_PAGE_TYPE_REG	= 0x02,
+ 	SGX_PAGE_TYPE_VA	= 0x03,
++	SGX_PAGE_TYPE_TRIM	= 0x04,
+ };
+ 
+ enum sgx_secinfo_flags {
+@@ -148,6 +149,7 @@ enum sgx_secinfo_flags {
+ 	SGX_SECINFO_SECS	= (SGX_PAGE_TYPE_SECS << 8),
+ 	SGX_SECINFO_TCS		= (SGX_PAGE_TYPE_TCS << 8),
+ 	SGX_SECINFO_REG		= (SGX_PAGE_TYPE_REG << 8),
++	SGX_SECINFO_TRIM	= (SGX_PAGE_TYPE_TRIM << 8),
  };
  
  struct sgx_secinfo {
-@@ -105,7 +106,7 @@ enum isgx_secs_attributes {
- 					   GENMASK_ULL(63, 6)),
- };
- 
--#define SGX_SECS_RESERVED1_SIZE 28
-+#define SGX_SECS_RESERVED1_SIZE 24
- #define SGX_SECS_RESERVED2_SIZE 32
- #define SGX_SECS_RESERVED3_SIZE 96
- #define SGX_SECS_RESERVED4_SIZE 3836
-@@ -114,6 +115,7 @@ struct sgx_secs {
- 	u64	size;
- 	u64	base;
- 	u32	ssaframesize;
-+	u32	misc_select;
- 	uint8_t reserved1[SGX_SECS_RESERVED1_SIZE];
- 	u64	flags;
- 	u64	xfrm;
-@@ -339,6 +341,7 @@ static inline int __emodt(struct sgx_secinfo *secinfo, void *epc)
- 	return __encls_ret(EMODT, secinfo, epc, rdx);
- }
- 
-+
- struct sgx_encl;
- 
- struct sgx_epc_page {
-diff --git a/sgx_ioctl.c b/sgx_ioctl.c
-index f2519a5..9cedfd3 100644
---- a/sgx_ioctl.c
-+++ b/sgx_ioctl.c
-@@ -73,6 +73,8 @@
- #include <linux/hashtable.h>
- #include <linux/shmem_fs.h>
- 
-+#define SGX_NR_MOD_CHUNK_PAGES 16
-+
- struct sgx_add_page_req {
- 	struct sgx_encl *encl;
- 	struct sgx_encl_page *encl_page;
-@@ -274,6 +276,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req)
+diff --git a/sgx_encl.c b/sgx_encl.c
+index 2669509..ccab446 100644
+--- a/sgx_encl.c
++++ b/sgx_encl.c
+@@ -279,6 +279,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
  	encl_page->epc_page = epc_page;
  	sgx_test_and_clear_young(encl_page, encl);
- 	list_add_tail(&encl_page->load_list, &encl->load_list);
+ 	list_add_tail(&epc_page->list, &encl->load_list);
 +	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
  
- 	mutex_unlock(&encl->lock);
- 	up_read(&encl->mm->mmap_sem);
-@@ -390,7 +393,9 @@ static int sgx_validate_secs(const struct sgx_secs *secs)
+ 	return true;
+ }
+@@ -431,8 +432,9 @@ static const struct mmu_notifier_ops sgx_mmu_notifier_ops = {
+ 	.release	= sgx_mmu_notifier_release,
+ };
  
- static int sgx_init_page(struct sgx_encl *encl,
- 			 struct sgx_encl_page *entry,
--			 unsigned long addr)
-+			 unsigned long addr,
-+			 struct sgx_epc_page **va_src,
-+			 bool already_locked)
+-static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
+-			 unsigned long addr, unsigned int alloc_flags)
++int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
++		  unsigned long addr, unsigned int alloc_flags,
++		  struct sgx_epc_page **va_src, bool already_locked)
  {
  	struct sgx_va_page *va_page;
  	struct sgx_epc_page *epc_page = NULL;
-@@ -409,10 +414,15 @@ static int sgx_init_page(struct sgx_encl *encl,
+@@ -451,10 +453,15 @@ static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
  		if (!va_page)
  			return -ENOMEM;
  
--		epc_page = sgx_alloc_page(0);
+-		epc_page = sgx_alloc_page(alloc_flags);
 -		if (IS_ERR(epc_page)) {
 -			kfree(va_page);
 -			return PTR_ERR(epc_page);
@@ -207,7 +188,7 @@ index f2519a5..9cedfd3 100644
 +			epc_page = *va_src;
 +			*va_src = NULL;
 +		} else {
-+			epc_page = sgx_alloc_page(0);
++			epc_page = sgx_alloc_page(alloc_flags);
 +			if (IS_ERR(epc_page)) {
 +				kfree(va_page);
 +				return PTR_ERR(epc_page);
@@ -215,7 +196,7 @@ index f2519a5..9cedfd3 100644
  		}
  
  		vaddr = sgx_get_page(epc_page);
-@@ -437,9 +447,11 @@ static int sgx_init_page(struct sgx_encl *encl,
+@@ -481,9 +488,11 @@ static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
  		va_page->epc_page = epc_page;
  		va_offset = sgx_alloc_va_slot(va_page);
  
@@ -229,51 +210,101 @@ index f2519a5..9cedfd3 100644
  	}
  
  	entry->va_page = va_page;
-@@ -556,7 +568,7 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
- 		goto out;
- 
- 	ret = sgx_init_page(encl, &encl->secs_page,
--			    encl->base + encl->size);
-+			    encl->base + encl->size, NULL, false);
+@@ -596,7 +605,8 @@ int sgx_encl_create(struct sgx_secs *secs)
  	if (ret)
  		goto out;
  
-@@ -592,17 +604,17 @@ static long sgx_ioc_enclave_create(struct file *filep, unsigned int cmd,
+-	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size, 0);
++	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size, 0,
++			    NULL, false);
+ 	if (ret)
  		goto out;
+ 
+@@ -766,7 +776,7 @@ static int __sgx_encl_add_page(struct sgx_encl *encl,
+ 			return ret;
  	}
  
--	down_read(&current->mm->mmap_sem);
-+	down_write(&current->mm->mmap_sem);
- 	vma = find_vma(current->mm, secs->base);
- 	if (!vma || vma->vm_ops != &sgx_vm_ops ||
- 	    vma->vm_start != secs->base ||
- 	    vma->vm_end != (secs->base + secs->size)) {
- 		ret = -EINVAL;
--		up_read(&current->mm->mmap_sem);
-+		up_write(&current->mm->mmap_sem);
- 		goto out;
- 	}
- 	vma->vm_private_data = encl;
--	up_read(&current->mm->mmap_sem);
-+	up_write(&current->mm->mmap_sem);
+-	ret = sgx_init_page(encl, encl_page, addr, 0);
++	ret = sgx_init_page(encl, encl_page, addr, 0, NULL, false);
+ 	if (ret)
+ 		return ret;
  
- 	mutex_lock(&sgx_tgid_ctx_mutex);
- 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);
-@@ -697,7 +709,7 @@ static int __encl_add_page(struct sgx_encl *encl,
- 		}
- 	}
- 
--	ret = sgx_init_page(encl, encl_page, addp->addr);
-+	ret = sgx_init_page(encl, encl_page, addp->addr, NULL, false);
- 	if (ret) {
- 		__free_page(tmp_page);
- 		return -EINVAL;
-@@ -930,6 +942,500 @@ out_free_page:
- 	return ret;
- }
- 
+diff --git a/sgx_encl2.c b/sgx_encl2.c
+new file mode 100644
+index 0000000..6a5556d
+--- /dev/null
++++ b/sgx_encl2.c
+@@ -0,0 +1,446 @@
++/*
++ * This file is provided under a dual BSD/GPLv2 license.  When using or
++ * redistributing this file, you may do so under either license.
++ *
++ * GPL LICENSE SUMMARY
++ *
++ * Copyright(c) 2016-2017 Intel Corporation.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of version 2 of the GNU General Public License as
++ * published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * Contact Information:
++ * Jarkko Sakkinen <jarkko.sakkinen@linux.intel.com>
++ * Intel Finland Oy - BIC 0357606-4 - Westendinkatu 7, 02160 Espoo
++ *
++ * BSD LICENSE
++ *
++ * Copyright(c) 2016-2017 Intel Corporation.
++ *
++ * Redistribution and use in source and binary forms, with or without
++ * modification, are permitted provided that the following conditions
++ * are met:
++ *
++ *   * Redistributions of source code must retain the above copyright
++ *     notice, this list of conditions and the following disclaimer.
++ *   * Redistributions in binary form must reproduce the above copyright
++ *     notice, this list of conditions and the following disclaimer in
++ *     the documentation and/or other materials provided with the
++ *     distribution.
++ *   * Neither the name of Intel Corporation nor the names of its
++ *     contributors may be used to endorse or promote products derived
++ *     from this software without specific prior written permission.
++ *
++ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
++ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
++ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
++ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
++ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
++ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
++ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
++ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
++ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
++ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
++ *
++ * Authors:
++ *
++ * Serge Ayoun <serge.ayoun@intel.com>
++ * Angie Chinchilla <angie.v.chinchilla@intel.com>
++ * Shay Katz-zamir <shay.katz-zamir@intel.com>
++ * Cedric Xing <cedric.xing@intel.com>
++ */
++
++#include "sgx.h"
++#include <linux/ratelimit.h>
++#include <linux/slab.h>
++
++#define SGX_NR_MOD_CHUNK_PAGES 16
++
++int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
++		  unsigned long addr, unsigned int alloc_flags,
++		  struct sgx_epc_page **va_src, bool already_locked);
 +/**
-+ * sgx_augment_encl() - adds a page to an enclave
++ * sgx_encl_augment() - adds a page to an enclave
 + * @addr:	virtual address where the page should be added
 + *
 + * the address is checked against the dynamic ranges defined for
@@ -282,11 +313,11 @@ index f2519a5..9cedfd3 100644
 + *
 + * Note: Invoking function must already hold the encl->lock
 + */
-+struct sgx_encl_page *sgx_augment_encl(struct vm_area_struct *vma,
++struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 +				       unsigned long addr,
 +				       bool write)
 +{
-+	struct sgx_page_info pginfo;
++	struct sgx_pageinfo pginfo;
 +	struct sgx_epc_page *epc_page, *va_page = NULL;
 +	struct sgx_epc_page *secs_epc_page = NULL;
 +	struct sgx_encl_page *encl_page;
@@ -327,7 +358,7 @@ index f2519a5..9cedfd3 100644
 +	if (!(encl->flags & SGX_ENCL_INITIALIZED))
 +		goto out;
 +
-+	if (encl->flags & SGX_ENCL_DEAD)
++	if (encl->flags & (SGX_ENCL_SUSPEND | SGX_ENCL_DEAD))
 +		goto out;
 +
 +	/*
@@ -336,7 +367,7 @@ index f2519a5..9cedfd3 100644
 +	*/
 +
 +	/* Start the augmenting process */
-+	ret = sgx_init_page(encl, encl_page, addr, &va_page, true);
++	ret = sgx_init_page(encl, encl_page, addr, 0, &va_page, true);
 +	if (ret)
 +		goto out;
 +
@@ -350,18 +381,18 @@ index f2519a5..9cedfd3 100644
 +			goto out;
 +		}
 +
-+		ret = sgx_eldu(encl, &encl->secs_page, secs_epc_page, true);
++		ret = sgx_eldu(encl, &encl->secs, secs_epc_page, true);
 +		if (ret)
 +			goto out;
 +
-+		encl->secs_page.epc_page = secs_epc_page;
++		encl->secs.epc_page = secs_epc_page;
 +		encl->flags &= ~SGX_ENCL_SECS_EVICTED;
 +
 +		/* Do not free */
 +		secs_epc_page = NULL;
 +	}
 +
-+	secs_va = sgx_get_page(encl->secs_page.epc_page);
++	secs_va = sgx_get_page(encl->secs.epc_page);
 +	epc_va = sgx_get_page(epc_page);
 +
 +	pginfo.srcpge = 0;
@@ -383,6 +414,7 @@ index f2519a5..9cedfd3 100644
 +		goto out;
 +	}
 +
++	epc_page->encl_page = encl_page;
 +	encl_page->epc_page = epc_page;
 +	encl->secs_child_cnt++;
 +
@@ -393,8 +425,7 @@ index f2519a5..9cedfd3 100644
 +		goto out;
 +	}
 +	sgx_test_and_clear_young(encl_page, encl);
-+
-+	list_add_tail(&encl_page->load_list, &encl->load_list);
++	list_add_tail(&encl_page->epc_page->list, &encl->load_list);
 +	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 +
 +	if (va_page)
@@ -436,12 +467,13 @@ index f2519a5..9cedfd3 100644
 +	unsigned long address, end;
 +	struct sgx_encl_page *encl_page;
 +	struct vm_area_struct *vma;
++	int ret;
 +
 +	address = rg->start_addr;
 +	end = address + rg->nr_pages * PAGE_SIZE;
 +
-+	vma = sgx_find_vma(encl, address);
-+	if (!vma)
++	ret = sgx_encl_find(encl->mm, address, &vma);
++	if (ret || encl != vma->vm_private_data)
 +		return -EINVAL;
 +
 +	for (; address < end; address += PAGE_SIZE) {
@@ -461,7 +493,7 @@ index f2519a5..9cedfd3 100644
 +		 * is removed from the load list
 +		 */
 +		mutex_lock(&encl->lock);
-+		list_move_tail(&encl_page->load_list, list);
++		list_move_tail(&encl_page->epc_page->list, list);
 +		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
 +		mutex_unlock(&encl->lock);
 +	}
@@ -472,7 +504,8 @@ index f2519a5..9cedfd3 100644
 +static int __modify_range(struct sgx_encl *encl,
 +			  struct sgx_range *rg, struct sgx_secinfo *secinfo)
 +{
-+	struct sgx_encl_page *encl_page, *tmp;
++	struct sgx_encl_page *encl_page;
++	struct sgx_epc_page *epc_page, *tmp;
 +	LIST_HEAD(list);
 +	bool emodt = secinfo->flags & (SGX_SECINFO_TRIM | SGX_SECINFO_TCS);
 +	unsigned int epoch = 0;
@@ -487,7 +520,8 @@ index f2519a5..9cedfd3 100644
 +		goto out;
 +
 +	/* EMODT / EMODPR */
-+	list_for_each_entry_safe(encl_page, tmp, &list, load_list) {
++	list_for_each_entry_safe(epc_page, tmp, &list, list) {
++		encl_page = epc_page->encl_page;
 +		if (!emodt && (encl_page->flags & SGX_ENCL_PAGE_TCS)) {
 +			sgx_err(encl, "sgx: illegal request: page at\
 +				address=0x%lx is a TCS, req flags=0x%llx\n",
@@ -496,7 +530,7 @@ index f2519a5..9cedfd3 100644
 +			continue;
 +		}
 +		mutex_lock(&encl->lock);
-+		epc_va = sgx_get_page(encl_page->epc_page);
++		epc_va = sgx_get_page(epc_page);
 +		status = SGX_LOCKFAIL;
 +		cnt = 0;
 +		while (SGX_LOCKFAIL == status && cnt < SGX_EDMM_SPIN_COUNT) {
@@ -541,7 +575,7 @@ index f2519a5..9cedfd3 100644
 +	return ret;
 +}
 +
-+static long modify_range(struct sgx_range *rg, unsigned long flags)
++long modify_range(struct sgx_range *rg, unsigned long flags)
 +{
 +	struct sgx_encl *encl;
 +	struct sgx_secinfo secinfo;
@@ -558,10 +592,10 @@ index f2519a5..9cedfd3 100644
 +	if (!rg->nr_pages)
 +		return -EINVAL;
 +
-+	ret = sgx_find_and_get_encl(rg->start_addr, &encl);
++	ret = sgx_get_encl(rg->start_addr, &encl);
 +	if (ret) {
-+		pr_debug("sgx: No enclave found at start addr 0x%lx ret=%d\n",
-+			 rg->start_addr, ret);
++		pr_warn("sgx: No enclave found at start addr 0x%lx ret=%d\n",
++			rg->start_addr, ret);
 +		return ret;
 +	}
 +
@@ -593,57 +627,15 @@ index f2519a5..9cedfd3 100644
 +	return ret;
 +}
 +
-+long sgx_ioc_page_modpr(struct file *filep, unsigned int cmd,
-+			unsigned long arg)
-+{
-+	struct sgx_modification_param *p =
-+		(struct sgx_modification_param *) arg;
-+
-+	/*
-+	 * Only RWX flags in mask are allowed
-+	 * Restricting WR w/o RD is not allowed
-+	 */
-+	if (p->flags & ~(SGX_SECINFO_R | SGX_SECINFO_W | SGX_SECINFO_X))
-+		return -EINVAL;
-+	if (!(p->flags & SGX_SECINFO_R) &&
-+	    (p->flags & SGX_SECINFO_W))
-+		return -EINVAL;
-+	return modify_range(&p->range, p->flags);
-+}
-+
-+/**
-+ * sgx_ioc_page_to_tcs() - Pages defined in range are switched to TCS.
-+ * These pages should be of type REG.
-+ * eaccept need to be invoked after that.
-+ * @arg range address of pages to be switched
-+ */
-+long sgx_ioc_page_to_tcs(struct file *filep, unsigned int cmd,
-+			 unsigned long arg)
-+{
-+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TCS);
-+}
-+
-+/**
-+ * sgx_ioc_trim_page() - Pages defined in range are being trimmed.
-+ * These pages still belong to the enclave and can not be removed until
-+ * eaccept has been invoked
-+ * @arg range address of pages to be trimmed
-+ */
-+long sgx_ioc_trim_page(struct file *filep, unsigned int cmd,
-+		       unsigned long arg)
-+{
-+	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TRIM);
-+}
-+
-+static int remove_page(struct sgx_encl *encl, unsigned long address,
-+		       bool trim)
++int remove_page(struct sgx_encl *encl, unsigned long address, bool trim)
 +{
 +	struct sgx_encl_page *encl_page;
 +	struct vm_area_struct *vma;
 +	struct sgx_va_page *va_page;
++	int ret;
 +
-+	vma = sgx_find_vma(encl, address);
-+	if (!vma)
++	ret = sgx_encl_find(encl->mm, address, &vma);
++	if (ret || encl != vma->vm_private_data)
 +		return -EINVAL;
 +
 +	encl_page = sgx_fault_page(vma, address, SGX_FAULT_RESERVE, NULL);
@@ -676,7 +668,8 @@ index f2519a5..9cedfd3 100644
 +	}
 +
 +	if (encl_page->epc_page) {
-+		list_del(&encl_page->load_list);
++		list_del(&encl_page->epc_page->list);
++		encl_page->epc_page->encl_page = NULL;
 +		zap_vma_ptes(vma, encl_page->addr, PAGE_SIZE);
 +		sgx_free_page(encl_page->epc_page, encl);
 +		encl->secs_child_cnt--;
@@ -687,6 +680,64 @@ index f2519a5..9cedfd3 100644
 +	kfree(encl_page);
 +
 +	return 0;
++}
+diff --git a/sgx_ioctl.c b/sgx_ioctl.c
+index f7540fc..0b3476d 100644
+--- a/sgx_ioctl.c
++++ b/sgx_ioctl.c
+@@ -73,7 +73,7 @@
+ #include <linux/hashtable.h>
+ #include <linux/shmem_fs.h>
+ 
+-static int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
++int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
+ {
+ 	struct mm_struct *mm = current->mm;
+ 	struct vm_area_struct *vma;
+@@ -251,6 +251,123 @@ out:
+ 	return ret;
+ }
+ 
++long sgx_ioc_page_modpr(struct file *filep, unsigned int cmd,
++			unsigned long arg)
++{
++	struct sgx_modification_param *p =
++		(struct sgx_modification_param *) arg;
++
++	/*
++	 * Only RWX flags in mask are allowed
++	 * Restricting WR w/o RD is not allowed
++	 */
++	if (p->flags & ~(SGX_SECINFO_R | SGX_SECINFO_W | SGX_SECINFO_X))
++		return -EINVAL;
++	if (!(p->flags & SGX_SECINFO_R) &&
++	    (p->flags & SGX_SECINFO_W))
++		return -EINVAL;
++	return modify_range(&p->range, p->flags);
++}
++
++/**
++ * sgx_ioc_page_to_tcs() - Pages defined in range are switched to TCS.
++ * These pages should be of type REG.
++ * eaccept needs to be invoked after return.
++ * @arg range address of pages to be switched
++ */
++long sgx_ioc_page_to_tcs(struct file *filep, unsigned int cmd,
++			 unsigned long arg)
++{
++	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TCS);
++}
++
++/**
++ * sgx_ioc_trim_page() - Pages defined in range are being trimmed.
++ * These pages still belong to the enclave and can not be removed until
++ * eaccept has been invoked
++ * @arg range address of pages to be trimmed
++ */
++long sgx_ioc_trim_page(struct file *filep, unsigned int cmd,
++		       unsigned long arg)
++{
++	return modify_range((struct sgx_range *)arg, SGX_SECINFO_TRIM);
 +}
 +
 +/**
@@ -712,9 +763,9 @@ index f2519a5..9cedfd3 100644
 +	address &= ~(PAGE_SIZE-1);
 +	end = address + rg->nr_pages * PAGE_SIZE;
 +
-+	ret = sgx_find_and_get_encl(address, &encl);
++	ret = sgx_get_encl(address, &encl);
 +	if (ret) {
-+		pr_debug("sgx: No enclave found at start address 0x%lx\n",
++		pr_warn("sgx: No enclave found at start address 0x%lx\n",
 +			address);
 +		return ret;
 +	}
@@ -734,8 +785,6 @@ index f2519a5..9cedfd3 100644
 +	return ret;
 +}
 +
-+
-+
 +/**
 + * sgx_ioc_page_remove() - Pages defined by address will be removed
 + * @arg address of page
@@ -750,16 +799,16 @@ index f2519a5..9cedfd3 100644
 +	if (!sgx_has_sgx2)
 +		return -ENOSYS;
 +
-+	if (sgx_find_and_get_encl(address, &encl)) {
-+		pr_debug("sgx: No enclave found at start address 0x%lx\n",
-+			 address);
++	if (sgx_get_encl(address, &encl)) {
++		pr_warn("sgx: No enclave found at start address 0x%lx\n",
++			address);
 +		return -EINVAL;
 +	}
 +
 +	ret = remove_page(encl, address, false);
 +	if (ret) {
-+		pr_debug("sgx: Failed to remove page, address=0x%lx ret=%d\n",
-+			  address, ret);
++		pr_warn("sgx: Failed to remove page, address=0x%lx ret=%d\n",
++			address, ret);
 +	}
 +
 +	kref_put(&encl->refcount, sgx_encl_release);
@@ -769,7 +818,7 @@ index f2519a5..9cedfd3 100644
  typedef long (*sgx_ioc_t)(struct file *filep, unsigned int cmd,
  			  unsigned long arg);
  
-@@ -949,6 +1455,21 @@ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
+@@ -270,6 +387,21 @@ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
  	case SGX_IOC_ENCLAVE_INIT:
  		handler = sgx_ioc_enclave_init;
  		break;
@@ -792,59 +841,40 @@ index f2519a5..9cedfd3 100644
  		return -ENOIOCTLCMD;
  	}
 diff --git a/sgx_main.c b/sgx_main.c
-index 91fee13..7e22bcc 100644
+index 7ff3864..7b7c384 100644
 --- a/sgx_main.c
 +++ b/sgx_main.c
-@@ -70,7 +70,7 @@
+@@ -71,7 +71,7 @@
  #include <linux/platform_device.h>
  
  #define DRV_DESCRIPTION "Intel SGX Driver"
 -#define DRV_VERSION "0.10"
 +#define DRV_VERSION "0.11"
  
- #define ENCL_SIZE_MAX_64 (64ULL * 1024ULL * 1024ULL * 1024ULL)
- #define ENCL_SIZE_MAX_32 (2ULL * 1024ULL * 1024ULL * 1024ULL)
+ MODULE_DESCRIPTION(DRV_DESCRIPTION);
+ MODULE_AUTHOR("Jarkko Sakkinen <jarkko.sakkinen@linux.intel.com>");
+@@ -95,6 +95,7 @@ u64 sgx_encl_size_max_64;
+ u64 sgx_xfrm_mask = 0x3;
+ u32 sgx_misc_reserved;
+ u32 sgx_xsave_size_tbl[64];
++bool sgx_has_sgx2;
+ 
+ #ifdef CONFIG_COMPAT
+ long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
+@@ -325,6 +326,8 @@ static int sgx_drv_probe(struct platform_device *pdev)
+ 		return -ENODEV;
+ 	}
+ 
++	sgx_has_sgx2 = (eax & 2) != 0;
++
+ 	return sgx_dev_init(&pdev->dev);
+ }
+ 
 diff --git a/sgx_page_cache.c b/sgx_page_cache.c
-index 0cb9b4e..728ad90 100644
+index 8472037..b4bc985 100644
 --- a/sgx_page_cache.c
 +++ b/sgx_page_cache.c
-@@ -242,19 +242,32 @@ static void sgx_eblock(struct sgx_encl *encl,
- 
- }
- 
--static void sgx_etrack(struct sgx_encl *encl)
-+bool sgx_etrack(struct sgx_encl *encl, unsigned int epoch)
- {
- 	void *epc;
- 	int ret;
-+	bool ipi = false;
-+
-+	/* If someone already called etrack in the meantime */
-+	if (epoch < encl->shadow_epoch)
-+		return false;
- 
- 	epc = sgx_get_page(encl->secs_page.epc_page);
- 	ret = __etrack(epc);
- 	sgx_put_page(epc);
--
--	if (ret) {
-+	encl->shadow_epoch++;
-+
-+	if (ret == SGX_PREV_TRK_INCMPL) {
-+		sgx_dbg(encl, "ETRACK returned %d\n", ret);
-+		smp_call_function(sgx_ipi_cb, NULL, 1);
-+		BUG_ON(__etrack(epc));
-+		ipi = true;
-+	} else if (ret) {
- 		sgx_crit(encl, "ETRACK returned %d\n", ret);
- 		sgx_invalidate(encl, true);
- 	}
-+
-+	return ipi;
- }
- 
- static int __sgx_ewb(struct sgx_encl *encl,
-@@ -362,7 +375,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
+@@ -335,7 +335,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
  	}
  
  	/* ETRACK */
@@ -854,10 +884,10 @@ index 0cb9b4e..728ad90 100644
  	/* EWB */
  	while (!list_empty(src)) {
 diff --git a/sgx_user.h b/sgx_user.h
-index 503f6be..d268b45 100644
+index a15f87b..50f0931 100644
 --- a/sgx_user.h
 +++ b/sgx_user.h
-@@ -71,6 +71,16 @@
+@@ -69,6 +69,16 @@
  	_IOW(SGX_MAGIC, 0x01, struct sgx_enclave_add_page)
  #define SGX_IOC_ENCLAVE_INIT \
  	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init)
@@ -874,25 +904,21 @@ index 503f6be..d268b45 100644
  
  /* SGX leaf instruction return values */
  #define SGX_SUCCESS			0
-@@ -92,6 +102,7 @@
- #define SGX_INVALID_LICENSE		16
+@@ -90,6 +100,7 @@
+ #define SGX_INVALID_EINITTOKEN		16
  #define SGX_PREV_TRK_INCMPL		17
  #define SGX_PG_IS_SECS			18
 +#define SGX_PAGE_NOT_MODIFIABLE		20
  #define SGX_INVALID_CPUSVN		32
  #define SGX_INVALID_ISVSVN		64
  #define SGX_UNMASKED_EVENT		128
-@@ -142,4 +153,22 @@ struct sgx_enclave_destroy {
- 	__u64	addr;
- } __packed;
+@@ -136,4 +147,18 @@ struct sgx_enclave_init {
+ 	__u64	einittoken;
+ } __attribute__((__packed__));
  
-+
 +/*
 + *     SGX2.0 definitions
 + */
-+
-+#define SGX_GROW_UP_FLAG	1
-+#define SGX_GROW_DOWN_FLAG	2
 +
 +struct sgx_range {
 +	unsigned long start_addr;
@@ -906,10 +932,10 @@ index 503f6be..d268b45 100644
 +
  #endif /* _UAPI_ASM_X86_SGX_H */
 diff --git a/sgx_util.c b/sgx_util.c
-index 614a635..16276f9 100644
+index ff0e40a..fd5022a 100644
 --- a/sgx_util.c
 +++ b/sgx_util.c
-@@ -145,7 +145,7 @@ void sgx_invalidate(struct sgx_encl *encl, bool flush_cpus)
+@@ -135,7 +135,7 @@ void sgx_invalidate(struct sgx_encl *encl, bool flush_cpus)
  		sgx_flush_cpus(encl);
  }
  
@@ -918,8 +944,8 @@ index 614a635..16276f9 100644
  {
  }
  
-@@ -186,10 +186,10 @@ int sgx_find_encl(struct mm_struct *mm, unsigned long addr,
- 	return 0;
+@@ -144,10 +144,10 @@ void sgx_flush_cpus(struct sgx_encl *encl)
+ 	on_each_cpu_mask(mm_cpumask(encl->mm), sgx_ipi_cb, NULL, 1);
  }
  
 -static int sgx_eldu(struct sgx_encl *encl,
@@ -933,31 +959,30 @@ index 614a635..16276f9 100644
  {
  	struct page *backing;
  	struct page *pcmd;
-@@ -253,7 +253,8 @@ out:
- }
+@@ -212,7 +212,8 @@ out:
  
  static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
--					  unsigned long addr, unsigned int flags)
-+					  unsigned long addr, unsigned int flags,
+ 					  unsigned long addr,
+-					  unsigned int flags)
++					  unsigned int flags,
 +				          struct vm_fault *vmf)
  {
  	struct sgx_encl *encl = vma->vm_private_data;
  	struct sgx_encl_page *entry;
-@@ -261,6 +262,8 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
+@@ -220,6 +221,7 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
  	struct sgx_epc_page *secs_epc_page = NULL;
  	bool reserve = (flags & SGX_FAULT_RESERVE) != 0;
  	int rc = 0;
 +	bool write = (vmf) ? (FAULT_FLAG_WRITE & vmf->flags) : false;
-+
  
  	/* If process was forked, VMA is still there but vm_private_data is set
  	 * to NULL.
-@@ -271,6 +274,14 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
+@@ -230,6 +232,14 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
  	mutex_lock(&encl->lock);
  
  	entry = radix_tree_lookup(&encl->page_tree, addr >> PAGE_SHIFT);
 +	if (vmf && !entry) {
-+		entry = sgx_augment_encl(vma, addr, write);
++		entry = sgx_encl_augment(vma, addr, write);
 +		goto out;
 +	}
 +
@@ -967,7 +992,7 @@ index 614a635..16276f9 100644
  	if (!entry) {
  		rc = -EFAULT;
  		goto out;
-@@ -371,12 +382,13 @@ out:
+@@ -331,12 +341,13 @@ out:
  
  struct sgx_encl_page *sgx_fault_page(struct vm_area_struct *vma,
  				     unsigned long addr,
@@ -983,11 +1008,39 @@ index 614a635..16276f9 100644
  		if (!(flags & SGX_FAULT_RESERVE))
  			break;
  	} while (PTR_ERR(entry) == -EBUSY);
+@@ -360,16 +371,25 @@ void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page)
+ 
+ }
+ 
+-void sgx_etrack(struct sgx_encl *encl)
++void sgx_etrack(struct sgx_encl *encl, unsigned int epoch)
+ {
+ 	void *epc;
+ 	int ret;
+ 
++	/* If someone already called etrack in the meantime */
++	if (epoch < encl->shadow_epoch)
++		return;
++
+ 	epc = sgx_get_page(encl->secs.epc_page);
+ 	ret = __etrack(epc);
+ 	sgx_put_page(epc);
++	encl->shadow_epoch++;
+ 
+-	if (ret) {
++	if (ret == SGX_PREV_TRK_INCMPL) {
++		sgx_dbg(encl, "ETRACK returned %d\n", ret);
++		smp_call_function(sgx_ipi_cb, NULL, 1);
++		BUG_ON(__etrack(epc));
++	} else if (ret) {
+ 		sgx_crit(encl, "ETRACK returned %d\n", ret);
+ 		sgx_invalidate(encl, true);
+ 	}
 diff --git a/sgx_vma.c b/sgx_vma.c
-index 4dbe26c..d76b948 100644
+index dae9eb9..bcd1047 100644
 --- a/sgx_vma.c
 +++ b/sgx_vma.c
-@@ -75,6 +75,12 @@ static void sgx_vma_open(struct vm_area_struct *vma)
+@@ -76,6 +76,12 @@ static void sgx_vma_open(struct vm_area_struct *vma)
  	if (!encl)
  		return;
  
@@ -1000,15 +1053,7 @@ index 4dbe26c..d76b948 100644
  	/* kref cannot underflow because ECREATE ioctl checks that there is only
  	 * one single VMA for the enclave before proceeding.
  	 */
-@@ -89,7 +95,6 @@ static void sgx_vma_close(struct vm_area_struct *vma)
- 
- 	mutex_lock(&encl->lock);
- 	zap_vma_ptes(vma, vma->vm_start, vma->vm_end - vma->vm_start);
--	encl->flags |= SGX_ENCL_DEAD;
- 	mutex_unlock(&encl->lock);
- 	kref_put(&encl->refcount, sgx_encl_release);
- }
-@@ -111,7 +116,7 @@ static int sgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+@@ -113,7 +119,7 @@ static int sgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
  #endif
  	struct sgx_encl_page *entry;
  
@@ -1017,7 +1062,7 @@ index 4dbe26c..d76b948 100644
  
  	if (!IS_ERR(entry) || PTR_ERR(entry) == -EBUSY)
  		return VM_FAULT_NOPAGE;
-@@ -210,7 +215,7 @@ static int sgx_vma_access(struct vm_area_struct *vma, unsigned long addr,
+@@ -212,7 +218,7 @@ static int sgx_vma_access(struct vm_area_struct *vma, unsigned long addr,
  				entry->flags &= ~SGX_ENCL_PAGE_RESERVED;
  
  			entry = sgx_fault_page(vma, (addr + i) & PAGE_MASK,
