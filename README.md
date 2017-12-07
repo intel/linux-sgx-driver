@@ -46,6 +46,31 @@ Build and Install the Intel(R) SGX Driver
   * 6th Generation Intel(R) Core(TM) Processor (code named Skylake)
   * 7th Generation Intel(R) Core(TM) Processor (code named Kaby Lake)
 - Configure the system with the **SGX hardware enabled** option.
+- To build the driver, the version of installed kernel headers must match the active kernel version on the system.
+  * On Ubuntu
+     * To check if matching kernel headers are installed:
+        ```
+        $ dpkg-query -s linux-headers-$(uname -r)
+        ```
+     * To install matching headers:
+        ```
+        $ sudo apt-get install linux-headers-$(uname -r)
+        ```
+  * On CentOS and RHEL
+     * To check if matching kernel headers are installed:
+        ```
+        $ ls /usr/src/kernels/$(uname -r)
+        ``` 
+     * To install matching headers:
+        ```
+        $ sudo yum install kernel-devel
+        ```
+     * After the above command, if the matching headers are still missing in /usr/src/kernels, try update kernel and reboot usig commands below. Then choose updated kernel on boot menu.
+        ```
+        $ sudo yum install kernel
+        $ sudo reboot
+        ```
+
 
 ### Build the Intel(R) SGX Driver
 **Note:** To use the SGX 2.0 driver, checkout or download the sgx2 branch and then follow the build instructions.
