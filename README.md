@@ -71,6 +71,10 @@ On Red Hat Enterprise Linux Server or CentOS, need to run below command on each 
 ```
 $ sudo /sbin/modprobe isgx
 ```    
+On SUSE, need to add '--allow-unsupported' flag when executing 'modprobe' command during the SGX driver intallation and on each reboot
+```
+$ sudo /sbin/modprobe isgx --allow-unsupported
+``` 
 
 ### Uninstall the Intel(R) SGX Driver
 Before uninstall the Intel(R) SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
