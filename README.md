@@ -13,9 +13,9 @@ The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts 
 
 Within the linux-sgx-driver project, two versions of the out-of-tree driver are provided. Both versions are compatible with the linux-sgx PSW and SDK:
 - SGX 2.0 Linux Driver (sgx2)
-  * The sgx2 branch of the linux-sgx-driver project contains the SGX 2.0 Linux Driver. This driver has additional support for SGX 2.0-based features available in upcoming CPUs. This driver has the same behavior as the SGX Linux Driver (master) on CPUs without SGX 2.0 support.
-- SGX Linux Driver (master)
-  * The master branch of the linux-sgx-driver project tracks the proposed upstream version of the SGX driver and does not yet support SGX 2.0-based features.
+  * The sgx2 branch of the linux-sgx-driver project contains the SGX 2.0 Linux Driver. This driver has additional support for SGX 2.0-based features available in upcoming CPUs. This driver has the same behavior as the SGX 1.5 Linux Driver (master) on CPUs without SGX 2.0 support.
+- SGX 1.5 Linux Driver (master)
+  * The master branch of the linux-sgx-driver project tracks the proposed upstream version of the SGX 1.5 driver and does not yet support SGX 2.0-based features.
 
 
 License
@@ -40,12 +40,15 @@ Build and Install the Intel(R) SGX Driver
 ### Prerequisites
 - Ensure that you have the following required operating systems:  
   * Ubuntu* Desktop-16.04-LTS 64bits
-  * Red Hat Enterprise Linux Server release 7.2 64bits
-  * CentOS 7.3.1611 64bits
+  * Red Hat Enterprise Linux Server release 7.4 64bits
+  * CentOS 7.4.1708 64bits
+  * SUSE Linux Enterprise Server 12 64bits
 - Ensure that you have the following required hardware:  
-  * 6th Generation Intel(R) Core(TM) Processor (code named Skylake)
-  * 7th Generation Intel(R) Core(TM) Processor (code named Kaby Lake)
+  * 6th Generation Intel(R) Core(TM) Processor or newer
 - Configure the system with the **SGX hardware enabled** option.
+
+**Note:** Refer to [Intel SGX Programming reference guide](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf)   section 1.7.2 to make sure your cpu has the SGX feature.
+
 
 ### Build the Intel(R) SGX Driver
 **Note:** To use the SGX 2.0 driver, checkout or download the sgx2 branch and then follow the build instructions.
@@ -68,7 +71,11 @@ $ sudo /sbin/modprobe isgx
 On Red Hat Enterprise Linux Server or CentOS, need to run below command on each reboot
 ```
 $ sudo /sbin/modprobe isgx
-```    
+``` 
+On SUSE, need to add '--allow-unsupported' flag when executing 'modprobe' command during the SGX driver intallation and on each reboot
+```
+$ sudo /sbin/modprobe isgx --allow-unsupported
+``` 
 
 ### Uninstall the Intel(R) SGX Driver
 Before uninstall the Intel(R) SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
