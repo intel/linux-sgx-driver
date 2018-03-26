@@ -181,10 +181,10 @@ static int sgx_measure(struct sgx_epc_page *secs_page,
 	void *secs;
 	void *epc;
 	int ret = 0;
-	int i, j;
+	int i;
 
-	for (i = 0, j = 1; i < 0x1000 && !ret; i += 0x100, j <<= 1) {
-		if (!(j & mrmask))
+	for (i = 0; (mrmask != 0) && (i < 0x1000) && !ret; i += 0x100, mrmask >>= 1) {
+		if (!(mrmask & 0x1))
 			continue;
 
 		secs = sgx_get_page(secs_page);
