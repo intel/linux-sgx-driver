@@ -32,7 +32,7 @@ The sgx2 branch hosts an initial implementation supporting SGX 2.0. This patch i
 Documentation
 -------------
 - [Intel(R) SGX for Linux\* OS](https://01.org/intel-softwareguard-extensions) project home page on [01.org](http://01.org)
-- [Intel(R) SGX Programming Reference](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf)
+- [Intel(R) SGX Programming Reference](https://software.intel.com/en-us/articles/intel-sdm)
 
 Build and Install the Intel(R) SGX Driver
 -----------------------------------------
@@ -73,7 +73,7 @@ Build and Install the Intel(R) SGX Driver
         ```
 
 
-**Note:** Refer to the *"Intel® SGX Resource Enumeration Leaves"* section in the [Intel SGX Programming reference guide](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf) to make sure your cpu has the SGX feature.
+**Note:** Refer to the *"Intel® SGX Resource Enumeration Leaves"* section in the [Intel SGX Programming reference guide](https://software.intel.com/en-us/articles/intel-sdm) to make sure your cpu has the SGX feature.
 
 
 ### Build the Intel(R) SGX Driver
