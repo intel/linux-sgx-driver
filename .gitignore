@@ -5,3 +5,4 @@
 *.symvers
 *.order
 *.tmp_versions
+/.cache.mk
