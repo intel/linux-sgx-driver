@@ -965,8 +965,7 @@ void sgx_encl_release(struct kref *ref)
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 
 	if (encl->mmu_notifier.ops)
-		mmu_notifier_unregister_no_release(&encl->mmu_notifier,
-						   encl->mm);
+		mmu_notifier_unregister(&encl->mmu_notifier, encl->mm);
 
 	radix_tree_for_each_slot(slot, &encl->page_tree, &iter, 0) {
 		entry = *slot;
