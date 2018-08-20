@@ -234,12 +234,15 @@ static int isolate_range(struct sgx_encl *encl,
 
 	address = rg->start_addr;
 	end = address + rg->nr_pages * PAGE_SIZE;
-
-	ret = sgx_encl_find(encl->mm, address, &vma);
-	if (ret || encl != vma->vm_private_data)
-		return -EINVAL;
+	down_read(&encl->mm->mmap_sem);
 
 	for (; address < end; address += PAGE_SIZE) {
+		ret = sgx_encl_find(encl->mm, address, &vma);
+		if (ret || encl != vma->vm_private_data) {
+			up_read(&encl->mm->mmap_sem);
+			return -EINVAL;
+		}
+
 		encl_page = ERR_PTR(-EBUSY);
 		while (encl_page == ERR_PTR(-EBUSY))
 			/* bring back page in case it was evicted */
@@ -247,6 +250,7 @@ static int isolate_range(struct sgx_encl *encl,
 						   SGX_FAULT_RESERVE, NULL);
 
 		if (IS_ERR(encl_page)) {
+			up_read(&encl->mm->mmap_sem);
 			sgx_err(encl, "sgx: No page found at address 0x%lx\n",
 				 address);
 			return PTR_ERR(encl_page);
@@ -261,6 +265,7 @@ static int isolate_range(struct sgx_encl *encl,
 		mutex_unlock(&encl->lock);
 	}
 
+	up_read(&encl->mm->mmap_sem);
 	return 0;
 }
 
