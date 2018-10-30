@@ -74,12 +74,12 @@ enum sgx_attribute {
 	SGX_ATTR_EINITTOKENKEY	= 0x20,
 };
 
-#define SGX_ATTR_RESERVED_MASK 0xFFFFFFFFFFFFFFC9L
+#define SGX_ATTR_RESERVED_MASK 0xFFFFFFFFFFFFFF49L
 
 #define SGX_SECS_RESERVED1_SIZE 24
 #define SGX_SECS_RESERVED2_SIZE 32
-#define SGX_SECS_RESERVED3_SIZE 96
-#define SGX_SECS_RESERVED4_SIZE 3836
+#define SGX_SECS_RESERVED3_SIZE 32
+#define SGX_SECS_RESERVED4_SIZE 3834
 
 struct sgx_secs {
 	uint64_t size;
@@ -92,9 +92,11 @@ struct sgx_secs {
 	uint32_t mrenclave[8];
 	uint8_t reserved2[SGX_SECS_RESERVED2_SIZE];
 	uint32_t mrsigner[8];
+	uint32_t configid[16];
 	uint8_t	reserved3[SGX_SECS_RESERVED3_SIZE];
 	uint16_t isvvprodid;
 	uint16_t isvsvn;
+	uint16_t configsvn;
 	uint8_t reserved4[SGX_SECS_RESERVED4_SIZE];
 };
 
