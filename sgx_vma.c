@@ -96,7 +96,11 @@ static void sgx_vma_close(struct vm_area_struct *vma)
 	kref_put(&encl->refcount, sgx_encl_release);
 }
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0))
+static unsigned int sgx_vma_fault(struct vm_fault *vmf)
+{
+	struct vm_area_struct *vma = vmf->vma;
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
 static int sgx_vma_fault(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
