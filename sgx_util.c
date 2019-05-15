@@ -334,6 +334,7 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 		goto out;
 	}
 
+	rc = 0;
 	sgx_test_and_clear_young(entry, encl);
 out:
 	mutex_unlock(&encl->lock);
