@@ -12,11 +12,14 @@ The Linux SGX software stack is comprised of the Intel(R) SGX driver, the Intel(
 The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which will be used until the driver upstreaming process is complete. 
 
 Within the linux-sgx-driver project, two versions of the out-of-tree driver are provided. Both versions are compatible with the linux-sgx PSW and SDK:
-- SGX 2.0 Linux Driver (sgx2)
+- SGX 2.0 Linux Driver (sgx2 branch)
   * The sgx2 branch of the linux-sgx-driver project contains the SGX 2.0 Linux Driver. This driver has additional support for SGX 2.0-based features available in upcoming CPUs. This driver has the same behavior as the SGX 1.5 Linux Driver (master) on CPUs without SGX 2.0 support.
-- SGX 1.5 Linux Driver (master)
+- SGX 1.5 Linux Driver (master branch)
   * The master branch of the linux-sgx-driver project tracks the proposed upstream version of the SGX 1.5 driver and does not yet support SGX 2.0-based features.
 
+IMPORTANT:
+---------
+Starting from 5/10/2019, the master branch (which supports only SGX 1.5-based features) is deprecated and is not supported anymore. Please use the sgx2 branch; it is a super set of the master branch.
 
 License
 -------
@@ -32,7 +35,7 @@ The sgx2 branch hosts an initial implementation supporting SGX 2.0. This patch i
 Documentation
 -------------
 - [Intel(R) SGX for Linux\* OS](https://01.org/intel-softwareguard-extensions) project home page on [01.org](http://01.org)
-- [Intel(R) SGX Programming Reference](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf)
+- [Intel(R) SGX Programming Reference](https://software.intel.com/en-us/articles/intel-sdm)
 
 Build and Install the Intel(R) SGX Driver
 -----------------------------------------
@@ -66,13 +69,15 @@ Build and Install the Intel(R) SGX Driver
         ```
         $ sudo yum install kernel-devel
         ```
-     * After the above command, if the matching headers are still missing in /usr/src/kernels, try update kernel and reboot using commands below. Then choose updated kernel on boot menu.
+     * After the above command, if the matching headers are still missing in /usr/src/kernels, try update kernel and reboot usig commands below. Then choose updated kernel on boot menu.
         ```
         $ sudo yum install kernel
         $ sudo reboot
         ```
 
-**Note:** Refer to the *"Intel® SGX Resource Enumeration Leaves"* section in the [Intel SGX Programming reference guide](https://software.intel.com/sites/default/files/managed/48/88/329298-002.pdf) to make sure your cpu has the SGX feature.
+
+**Note:** Refer to the *"Intel® SGX Resource Enumeration Leaves"* section in the [Intel SGX Programming reference guide](https://software.intel.com/en-us/articles/intel-sdm) to make sure your cpu has the SGX feature.
+
 
 ### Build the Intel(R) SGX Driver
 **Note:** To use the SGX 2.0 driver, checkout or download the sgx2 branch and then follow the build instructions.
@@ -95,7 +100,7 @@ $ sudo /sbin/modprobe isgx
 On Red Hat Enterprise Linux Server or CentOS, need to run below command on each reboot
 ```
 $ sudo /sbin/modprobe isgx
-```    
+``` 
 On SUSE, need to add '--allow-unsupported' flag when executing 'modprobe' command during the SGX driver intallation and on each reboot
 ```
 $ sudo /sbin/modprobe isgx --allow-unsupported
