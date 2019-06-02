@@ -92,8 +92,8 @@ struct sgx_secs {
 	uint32_t mrenclave[8];
 	uint8_t reserved2[SGX_SECS_RESERVED2_SIZE];
 	uint32_t mrsigner[8];
-	uint32_t configid[16];
 	uint8_t	reserved3[SGX_SECS_RESERVED3_SIZE];
+	uint32_t configid[16];
 	uint16_t isvvprodid;
 	uint16_t isvsvn;
 	uint16_t configsvn;
