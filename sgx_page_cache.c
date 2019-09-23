@@ -86,8 +86,11 @@ static unsigned int sgx_nr_high_pages;
 static struct task_struct *ksgxswapd_tsk;
 static DECLARE_WAIT_QUEUE_HEAD(ksgxswapd_waitq);
 
-static int sgx_test_and_clear_young_cb(pte_t *ptep, pgtable_t token,
-				       unsigned long addr, void *data)
+static int sgx_test_and_clear_young_cb(pte_t *ptep,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0))
+		pgtable_t token,
+#endif
+		unsigned long addr, void *data)
 {
 	pte_t pte;
 	int ret;
