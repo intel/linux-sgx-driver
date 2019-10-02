@@ -109,32 +109,35 @@ $ sudo /sbin/modprobe isgx --allow-unsupported
 
 #### Install the SGX Driver on a UEFI Secure Boot Enableed machine
 If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
-1. Generate the key by using openssl:
+  * Generate the key by using openssl:
 ```
 $ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
 ```
 
-2. Signing the isgx:
+  * Signing the isgx:
 ```
 $ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
 ```
 
-3. Check if isgx signed
+  * Check if isgx signed
 ```
 $tail $(modinfo -n isgx) | grep "Module signature appended"
 ```
 
-4. Register the keys to Secure Boot
+  * Register the keys to Secure Boot
 ```
 $ sudo mokutil --import MOK.der
 ```
 
-5. Reboot and follow the bluescreen to enrol the MOK, it's operated by shimx64.efi and will happens after POSTS but before system boots.[Image References](https://sourceware.org/systemtap/wiki/SecureBoot)
+  * Reboot and follow the bluescreen to enrol the MOK, it's operated by shimx64.efi and will happens after POSTS but before system boots.[Image References](https://sourceware.org/systemtap/wiki/SecureBoot)
 
-6. Check if MOK key is registered.
+  * Check if MOK key is registered.
 ```
 $ sudo mokutil --test-key MOK.der
 ```
+  * Then resume steps before this section. It won't have error when executing `$ sudo /sbin/modprobe isgx`.
+
+
 
 [Subtitle Step Reference](https://askubuntu.com/questions/760671/could-not-load-vboxdrv-after-upgrade-to-ubuntu-16-04-and-i-want-to-keep-secur/768310#768310)
 
