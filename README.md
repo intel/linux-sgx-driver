@@ -110,31 +110,31 @@ $ sudo /sbin/modprobe isgx --allow-unsupported
 #### Install the SGX Driver on a UEFI Secure Boot Enableed machine
 If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
   * Generate the key by using openssl:
-```
-$ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
-```
+  ```
+  $ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
+   ```
 
   * Signing the isgx:
-```
-$ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
-```
+  ```
+  $ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
+  ```
 
   * Check if isgx signed
-```
-$tail $(modinfo -n isgx) | grep "Module signature appended"
-```
+  ```
+  $tail $(modinfo -n isgx) | grep "Module signature appended"
+  ```
 
   * Register the keys to Secure Boot
-```
-$ sudo mokutil --import MOK.der
-```
+  ```
+  $ sudo mokutil --import MOK.der
+  ```
 
   * Reboot and follow the bluescreen to enrol the MOK, it's operated by shimx64.efi and will happens after POSTS but before system boots.[Image References](https://sourceware.org/systemtap/wiki/SecureBoot)
 
   * Check if MOK key is registered.
-```
-$ sudo mokutil --test-key MOK.der
-```
+  ```
+  $ sudo mokutil --test-key MOK.der
+  ```
   * Then resume steps before this section. It won't have error when executing `$ sudo /sbin/modprobe isgx`.
 
 
