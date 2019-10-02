@@ -97,6 +97,8 @@ u64 sgx_xfrm_mask = 0x3;
 u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
+atomic_t sgx_load_list_nr = ATOMIC_INIT(0);
+
 
 #ifdef CONFIG_COMPAT
 long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
@@ -270,9 +272,6 @@ static int sgx_dev_init(struct device *parent)
 		goto out_workqueue;
 	}
 
-	if (ret)
-		goto out_workqueue;
-
 	return 0;
 out_workqueue:
 	destroy_workqueue(sgx_add_page_wq);
@@ -341,6 +340,8 @@ static int sgx_drv_remove(struct platform_device *pdev)
 		return 0;
 	}
 
+	sgx_page_cache_teardown();
+
 	misc_deregister(&sgx_dev);
 
 	destroy_workqueue(sgx_add_page_wq);
@@ -348,7 +349,6 @@ static int sgx_drv_remove(struct platform_device *pdev)
 	for (i = 0; i < sgx_nr_epc_banks; i++)
 		iounmap((void *)sgx_epc_banks[i].va);
 #endif
-	sgx_page_cache_teardown();
 
 	return 0;
 }

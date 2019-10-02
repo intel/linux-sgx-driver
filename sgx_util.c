@@ -67,8 +67,49 @@
 	#include <linux/mm.h>
 #endif
 
+/*
+ *	This is the layout of the backing store:
+ *	encl->size: reserved for enclave's pages
+ *	one page for SECS
+ *	next pages for VA pages
+ */
+unsigned long get_backing_pcmd_index(struct sgx_page *entry,
+		struct sgx_encl *encl)
+{
+	struct sgx_encl_page *ep;
+	unsigned long val;
+
+	if (sgx_is_va(entry)) {
+		val = sgx_get_vapage_index(entry);
+		val <<= PAGE_SHIFT;
+		val += encl->size;
+		val += PAGE_SIZE;
+		return val;
+	}
+
+	ep = (struct sgx_encl_page *) entry;
+
+	return ep->addr - encl->base;
+}
+
+unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl)
+{
+	unsigned long offset;
+
+	if (sgx_is_va(entry)) {
+		offset = sgx_get_vapage_index(entry);
+		offset <<= PAGE_SHIFT;
+		offset += encl->base + encl->size;
+		offset += PAGE_SIZE;
+	} else {
+		offset = ((struct sgx_encl_page *)entry)->addr;
+	}
+
+	return ((offset >> PAGE_SHIFT) & 0x1f) * 0x80;
+}
+
 struct page *sgx_get_backing(struct sgx_encl *encl,
-			     struct sgx_encl_page *entry,
+			     struct sgx_page *entry,
 			     bool pcmd)
 {
 	struct inode *inode;
@@ -83,11 +124,12 @@ struct page *sgx_get_backing(struct sgx_encl *encl,
 
 	mapping = inode->i_mapping;
 	gfpmask = mapping_gfp_mask(mapping);
+	index = get_backing_pcmd_index(entry, encl);
 
 	if (pcmd)
-		index = (entry->addr - encl->base) >> (PAGE_SHIFT + 5);
+		index = index >> (PAGE_SHIFT + 5);
 	else
-		index = (entry->addr - encl->base) >> PAGE_SHIFT;
+		index = index >> PAGE_SHIFT;
 
 	return shmem_read_mapping_page_gfp(mapping, index, gfpmask);
 }
@@ -106,11 +148,13 @@ void sgx_zap_tcs_ptes(struct sgx_encl *encl, struct vm_area_struct *vma)
 	struct sgx_encl_page *entry;
 
 	list_for_each_entry(tmp, &encl->load_list, list) {
-		entry = tmp->encl_page;
-		if ((entry->flags & SGX_ENCL_PAGE_TCS) &&
-		    entry->addr >= vma->vm_start &&
-		    entry->addr < vma->vm_end)
-			zap_vma_ptes(vma, entry->addr, PAGE_SIZE);
+		if (!sgx_is_epc_page_va(tmp)) {
+			entry = tmp->encl_page;
+			if ((entry->flags & SGX_ENCL_PAGE_TCS) &&
+			    entry->addr >= vma->vm_start &&
+			    entry->addr < vma->vm_end)
+				zap_vma_ptes(vma, entry->addr, PAGE_SIZE);
+		}
 	}
 }
 
@@ -144,12 +188,13 @@ void sgx_flush_cpus(struct sgx_encl *encl)
 	on_each_cpu_mask(mm_cpumask(encl->mm), sgx_ipi_cb, NULL, 1);
 }
 
+#include <linux/kernel.h>
 int sgx_eldu(struct sgx_encl *encl,
-	     struct sgx_encl_page *encl_page,
+	     struct sgx_page *epage,
 	     struct sgx_epc_page *epc_page,
 	     bool is_secs)
 {
-	struct page *backing;
+	struct page *backing = NULL;
 	struct page *pcmd;
 	unsigned long pcmd_offset;
 	struct sgx_pageinfo pginfo;
@@ -158,38 +203,64 @@ int sgx_eldu(struct sgx_encl *encl,
 	void *va_ptr;
 	int ret;
 
-	pcmd_offset = ((encl_page->addr >> PAGE_SHIFT) & 31) * 128;
+	if (!epage->va_page->epc_page) {
+		/* va page was evicted, we need to reload it */
+		struct sgx_epc_page *va_epc_page =
+			sgx_alloc_page(SGX_ALLOC_ATOMIC);
 
-	backing = sgx_get_backing(encl, encl_page, false);
+		if (IS_ERR(va_epc_page)) {
+			ret = PTR_ERR(va_epc_page);
+			sgx_err(encl, "VA page allocation failure\n");
+			goto out;
+		}
+
+		ret = sgx_eldu(encl, (struct sgx_page *)(epage->va_page),
+			va_epc_page, false);
+		if (ret) {
+			sgx_err(encl, "Reload va page failure\n");
+			sgx_free_page(va_epc_page, encl);
+			goto out;
+		}
+
+		epage->va_page->epc_page = va_epc_page;
+		va_epc_page->va_page = epage->va_page;
+		load_list_insert_epc_page(va_epc_page, encl);
+	}
+
+	pcmd_offset = get_pcmd_offset(epage, encl);
+
+	backing = sgx_get_backing(encl, epage, false);
 	if (IS_ERR(backing)) {
 		ret = PTR_ERR(backing);
-		sgx_warn(encl, "pinning the backing page for ELDU failed with %d\n",
+		sgx_warn(encl,
+			"Pinning the backing page for ELDU failed with %d\n",
 			 ret);
 		return ret;
 	}
 
-	pcmd = sgx_get_backing(encl, encl_page, true);
+	pcmd = sgx_get_backing(encl, epage, true);
 	if (IS_ERR(pcmd)) {
 		ret = PTR_ERR(pcmd);
-		sgx_warn(encl, "pinning the pcmd page for EWB failed with %d\n",
+		sgx_warn(encl,
+			"Pinning the pcmd page for EWB failed with %d\n",
 			 ret);
 		goto out;
 	}
 
-	if (!is_secs)
+	if (!is_secs && !sgx_is_va(epage))
 		secs_ptr = sgx_get_page(encl->secs.epc_page);
 
 	epc_ptr = sgx_get_page(epc_page);
-	va_ptr = sgx_get_page(encl_page->va_page->epc_page);
+	va_ptr = sgx_get_page(epage->va_page->epc_page);
 	pginfo.srcpge = (unsigned long)kmap_atomic(backing);
 	pginfo.pcmd = (unsigned long)kmap_atomic(pcmd) + pcmd_offset;
-	pginfo.linaddr = is_secs ? 0 : encl_page->addr;
+	pginfo.linaddr = (is_secs || sgx_is_va(epage)) ?
+		0 : ((struct sgx_encl_page *)epage)->addr;
 	pginfo.secs = (unsigned long)secs_ptr;
 
 	ret = __eldu((unsigned long)&pginfo,
 		     (unsigned long)epc_ptr,
-		     (unsigned long)va_ptr +
-		     encl_page->va_offset);
+		     (unsigned long)va_ptr + epage->va_offset);
 	if (ret) {
 		sgx_err(encl, "ELDU returned %d\n", ret);
 		ret = -EFAULT;
@@ -205,8 +276,9 @@ int sgx_eldu(struct sgx_encl *encl,
 
 	sgx_put_backing(pcmd, false);
 
-out:
-	sgx_put_backing(backing, false);
+ out:
+	if (backing)
+		sgx_put_backing(backing, false);
 	return ret;
 }
 
@@ -286,7 +358,8 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 			goto out;
 		}
 
-		rc = sgx_eldu(encl, &encl->secs, secs_epc_page, true);
+		rc = sgx_eldu(encl, (struct sgx_page *)&encl->secs,
+				secs_epc_page, true);
 		if (rc)
 			goto out;
 
@@ -297,7 +370,7 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 		secs_epc_page = NULL;
 	}
 
-	rc = sgx_eldu(encl, entry, epc_page, false /* is_secs */);
+	rc = sgx_eldu(encl, (struct sgx_page *)entry, epc_page, false);
 	if (rc)
 		goto out;
 
@@ -317,7 +390,7 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 
 	/* Do not free */
 	epc_page = NULL;
-	list_add_tail(&entry->epc_page->list, &encl->load_list);
+	load_list_insert_epc_page(entry->epc_page, encl);
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0))
 	rc = vmf_insert_pfn(vma, entry->addr, PFN_DOWN(entry->epc_page->pa));
@@ -335,13 +408,15 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 	}
 
 	rc = 0;
-	sgx_test_and_clear_young(entry, encl);
+	sgx_test_and_clear_young(entry->epc_page, encl);
 out:
+
 	mutex_unlock(&encl->lock);
 	if (epc_page)
 		sgx_free_page(epc_page, encl);
 	if (secs_epc_page)
 		sgx_free_page(secs_epc_page, encl);
+
 	return rc ? ERR_PTR(rc) : entry;
 }
 
@@ -366,6 +441,8 @@ void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page)
 	void *vaddr;
 	int ret;
 
+	if (sgx_is_epc_page_va(epc_page))
+		return;
 	vaddr = sgx_get_page(epc_page);
 	ret = __eblock((unsigned long)vaddr);
 	sgx_put_page(vaddr);
@@ -374,7 +451,6 @@ void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page)
 		sgx_crit(encl, "EBLOCK returned %d\n", ret);
 		sgx_invalidate(encl, true);
 	}
-
 }
 
 void sgx_etrack(struct sgx_encl *encl, unsigned int epoch)

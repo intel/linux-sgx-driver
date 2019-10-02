@@ -130,7 +130,8 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 	*/
 
 	/* Start the augmenting process */
-	ret = sgx_init_page(encl, encl_page, addr, 0, &va_page, true);
+	ret = sgx_init_page(encl, encl_page, addr, SGX_ALLOC_ATOMIC,
+			&va_page, true);
 	if (ret)
 		goto out;
 
@@ -144,7 +145,8 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 			goto out;
 		}
 
-		ret = sgx_eldu(encl, &encl->secs, secs_epc_page, true);
+		ret = sgx_eldu(encl, (struct sgx_page *)&encl->secs,
+				secs_epc_page, true);
 		if (ret)
 			goto out;
 
@@ -194,8 +196,8 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 		pr_err("sgx: radix_tree_insert failed with ret=%d\n", ret);
 		goto out;
 	}
-	sgx_test_and_clear_young(encl_page, encl);
-	list_add_tail(&encl_page->epc_page->list, &encl->load_list);
+	sgx_test_and_clear_young(epc_page, encl);
+	load_list_insert_epc_page(encl_page->epc_page, encl);
 	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 
 	if (va_page)
@@ -232,13 +234,14 @@ out:
 }
 
 static int isolate_range(struct sgx_encl *encl,
-			 struct sgx_range *rg, struct list_head *list)
+			 struct sgx_range *rg, struct list_head *list, int *nr)
 {
 	unsigned long address, end;
 	struct sgx_encl_page *encl_page;
 	struct vm_area_struct *vma;
 	int ret;
 
+	*nr = 0;
 	address = rg->start_addr;
 	end = address + rg->nr_pages * PAGE_SIZE;
 	down_read(&encl->mm->mmap_sem);
@@ -267,7 +270,8 @@ static int isolate_range(struct sgx_encl *encl,
 		 * is removed from the load list
 		 */
 		mutex_lock(&encl->lock);
-		list_move_tail(&encl_page->epc_page->list, list);
+		load_list_extract_epc_page_to_list(encl_page->epc_page, list);
+		(*nr)++;
 		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
 		mutex_unlock(&encl->lock);
 	}
@@ -285,9 +289,9 @@ static int __modify_range(struct sgx_encl *encl,
 	bool emodt = secinfo->flags & (SGX_SECINFO_TRIM | SGX_SECINFO_TCS);
 	unsigned int epoch = 0;
 	void *epc_va;
-	int ret = 0, cnt, status = 0;
+	int ret = 0, cnt, status = 0, nr;
 
-	ret = isolate_range(encl, rg, &list);
+	ret = isolate_range(encl, rg, &list, &nr);
 	if (ret)
 		goto out;
 
@@ -343,7 +347,7 @@ static int __modify_range(struct sgx_encl *encl,
 out:
 	if (!list_empty(&list)) {
 		mutex_lock(&encl->lock);
-		list_splice(&list, &encl->load_list);
+		load_list_return_list(&list, encl, nr);
 		mutex_unlock(&encl->lock);
 	}
 
@@ -436,14 +440,14 @@ int remove_page(struct sgx_encl *encl, unsigned long address, bool trim)
 		sgx_free_va_slot(va_page, encl_page->va_offset);
 
 		if (sgx_va_slots_empty(va_page)) {
-			list_del(&va_page->list);
+			va_list_del_va_page(va_page);
 			sgx_free_page(va_page->epc_page, encl);
 			kfree(va_page);
 		}
 	}
 
 	if (encl_page->epc_page) {
-		list_del(&encl_page->epc_page->list);
+		load_list_del_epc_page(encl_page->epc_page);
 		encl_page->epc_page->encl_page = NULL;
 		zap_vma_ptes(vma, encl_page->addr, PAGE_SIZE);
 		sgx_free_page(encl_page->epc_page, encl);

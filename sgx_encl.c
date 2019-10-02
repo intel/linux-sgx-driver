@@ -240,7 +240,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
 	if (ret)
 		return false;
 
-	backing = sgx_get_backing(encl, encl_page, false);
+	backing = sgx_get_backing(encl, (struct sgx_page *)encl_page, false);
 	if (IS_ERR(backing))
 		return false;
 
@@ -282,8 +282,8 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
 
 	epc_page->encl_page = encl_page;
 	encl_page->epc_page = epc_page;
-	sgx_test_and_clear_young(encl_page, encl);
-	list_add_tail(&epc_page->list, &encl->load_list);
+	sgx_test_and_clear_young(epc_page, encl);
+	load_list_insert_epc_page(epc_page, encl);
 	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 
 	return true;
@@ -300,26 +300,38 @@ static void sgx_add_page_worker(struct work_struct *work)
 	encl = container_of(work, struct sgx_encl, add_page_work);
 
 	do {
+		int loop = 0;
+
+retry:
 		schedule();
 
 		if (encl->flags & SGX_ENCL_DEAD)
 			skip_rest = true;
 
-		mutex_lock(&encl->lock);
 		req = list_first_entry(&encl->add_page_reqs,
 				       struct sgx_add_page_req, list);
-		list_del(&req->list);
-		is_empty = list_empty(&encl->add_page_reqs);
-		mutex_unlock(&encl->lock);
-
-		if (skip_rest)
+		if (skip_rest) {
+			mutex_lock(&encl->lock);
+			list_del(&req->list);
+			is_empty = list_empty(&encl->add_page_reqs);
+			mutex_unlock(&encl->lock);
 			goto next;
+		}
 
 		epc_page = sgx_alloc_page(0);
 		if (IS_ERR(epc_page)) {
-			skip_rest = true;
-			goto next;
+			loop++;
+			if (loop >= 5) {
+				skip_rest = true;
+				sgx_warn(encl, "alloc_page attempts fail\n");
+			}
+			goto retry;
 		}
+
+		mutex_lock(&encl->lock);
+		list_del(&req->list);
+		is_empty = list_empty(&encl->add_page_reqs);
+		mutex_unlock(&encl->lock);
 
 		down_read(&encl->mm->mmap_sem);
 		mutex_lock(&encl->lock);
@@ -442,10 +454,7 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		  struct sgx_epc_page **va_src, bool already_locked)
 {
 	struct sgx_va_page *va_page;
-	struct sgx_epc_page *epc_page = NULL;
 	unsigned int va_offset = PAGE_SIZE;
-	void *vaddr;
-	int ret = 0;
 
 	list_for_each_entry(va_page, &encl->va_pages, list) {
 		va_offset = sgx_alloc_va_slot(va_page);
@@ -454,48 +463,27 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 	}
 
 	if (va_offset == PAGE_SIZE) {
-		va_page = kzalloc(sizeof(*va_page), GFP_KERNEL);
+		unsigned int slot;
+
+		va_page = sgx_alloc_va_page(va_src, alloc_flags);
 		if (!va_page)
 			return -ENOMEM;
 
-		if (va_src) {
-			epc_page = *va_src;
-			*va_src = NULL;
-		} else {
-			epc_page = sgx_alloc_page(alloc_flags);
-			if (IS_ERR(epc_page)) {
-				kfree(va_page);
-				return PTR_ERR(epc_page);
-			}
-		}
-
-		vaddr = sgx_get_page(epc_page);
-		if (!vaddr) {
-			sgx_warn(encl, "kmap of a new VA page failed %d\n",
-				 ret);
-			sgx_free_page(epc_page, encl);
-			kfree(va_page);
-			return -EFAULT;
-		}
-
-		ret = __epa(vaddr);
-		sgx_put_page(vaddr);
-
-		if (ret) {
-			sgx_warn(encl, "EPA returned %d\n", ret);
-			sgx_free_page(epc_page, encl);
-			kfree(va_page);
-			return -EFAULT;
-		}
-
-		atomic_inc(&sgx_va_pages_cnt);
-
-		va_page->epc_page = epc_page;
 		va_offset = sgx_alloc_va_slot(va_page);
+
+		va_page->va_page = sgx_alloc_va2_slot_page(&slot, alloc_flags);
+		if (!va_page->va_page) {
+			sgx_warn(encl, "va2 page allocation failure\n");
+			sgx_free_page(va_page->epc_page, encl);
+			kfree(va_page);
+			return -EFAULT;
+		}
+		load_list_insert_epc_page(va_page->epc_page, encl);
+		va_page->va_offset = slot;
 
 		if (!already_locked)
 			mutex_lock(&encl->lock);
-		list_add(&va_page->list, &encl->va_pages);
+		va_list_insert(va_page, encl);
 		if (!already_locked)
 			mutex_unlock(&encl->lock);
 	}
@@ -526,17 +514,27 @@ static struct sgx_encl *sgx_encl_alloc(struct sgx_secs *secs)
 	struct sgx_encl *encl;
 	struct file *backing;
 	struct file *pcmd;
+	uint64_t backing_size;
 
 	ssaframesize = sgx_calc_ssaframesize(secs->miscselect, secs->xfrm);
 	if (sgx_validate_secs(secs, ssaframesize))
 		return ERR_PTR(-EINVAL);
 
-	backing = shmem_file_setup("[dev/sgx]", secs->size + PAGE_SIZE,
-				   VM_NORESERVE);
+	/*
+	 *	backing size is:
+	 *	enclave size +
+	 *	one page for SECS +
+	 *	VA pages size = upper-4k_round((enclave size+4K) /
+	 *		SGX_VA_SLOT_COUNT)
+	 */
+	backing_size = secs->size + PAGE_SIZE;
+	backing_size += ((backing_size / SGX_VA_SLOT_COUNT) & (~(PAGE_SIZE-1)));
+	backing_size += PAGE_SIZE;
+	backing = shmem_file_setup("[dev/sgx]", backing_size, VM_NORESERVE);
 	if (IS_ERR(backing))
 		return (void *)backing;
 
-	pcmd = shmem_file_setup("[dev/sgx]", (secs->size + PAGE_SIZE) >> 5,
+	pcmd = shmem_file_setup("[dev/sgx]", backing_size >> 5,
 				VM_NORESERVE);
 	if (IS_ERR(pcmd)) {
 		fput(backing);
@@ -555,9 +553,9 @@ static struct sgx_encl *sgx_encl_alloc(struct sgx_secs *secs)
 
 	kref_init(&encl->refcount);
 	INIT_LIST_HEAD(&encl->add_page_reqs);
-	INIT_LIST_HEAD(&encl->va_pages);
+	va_list_init(encl);
 	INIT_RADIX_TREE(&encl->page_tree, GFP_KERNEL);
-	INIT_LIST_HEAD(&encl->load_list);
+	load_list_init(encl);
 	INIT_LIST_HEAD(&encl->encl_list);
 	mutex_init(&encl->lock);
 	INIT_WORK(&encl->add_page_work, sgx_add_page_worker);
@@ -803,7 +801,7 @@ static int __sgx_encl_add_page(struct sgx_encl *encl,
 		goto out;
 	}
 
-	backing = sgx_get_backing(encl, encl_page, false);
+	backing = sgx_get_backing(encl, (struct sgx_page *)encl_page, false);
 	if (IS_ERR((void *)backing)) {
 		ret = PTR_ERR((void *)backing);
 		goto out;
@@ -975,20 +973,22 @@ void sgx_encl_release(struct kref *ref)
 	radix_tree_for_each_slot(slot, &encl->page_tree, &iter, 0) {
 		entry = *slot;
 		if (entry->epc_page) {
-			list_del(&entry->epc_page->list);
+			load_list_del_epc_page(entry->epc_page);
+			WARN_ON(sgx_is_va(entry));
 			sgx_free_page(entry->epc_page, encl);
 		}
 		radix_tree_delete(&encl->page_tree, entry->addr >> PAGE_SHIFT);
 		kfree(entry);
 	}
 
-	while (!list_empty(&encl->va_pages)) {
-		va_page = list_first_entry(&encl->va_pages,
-					   struct sgx_va_page, list);
-		list_del(&va_page->list);
-		sgx_free_page(va_page->epc_page, encl);
+	while (!va_list_is_empty(encl)) {
+		va_page = va_list_get_first_va_page(encl);
+		if (va_page->epc_page) {
+			load_list_del_epc_page(va_page->epc_page);
+			sgx_free_page(va_page->epc_page, encl);
+		}
+		va_list_del_va_page(va_page);
 		kfree(va_page);
-		atomic_dec(&sgx_va_pages_cnt);
 	}
 
 	if (encl->secs.epc_page)

@@ -60,7 +60,6 @@
 #ifndef __ARCH_INTEL_SGX_H__
 #define __ARCH_INTEL_SGX_H__
 
-#include "sgx_asm.h"
 #include <linux/kref.h>
 #include <linux/version.h>
 #include <linux/rbtree.h>
@@ -72,6 +71,7 @@
 #include <linux/mm.h>
 #include "sgx_arch.h"
 #include "sgx_user.h"
+#include "sgx_asm.h"
 
 #define SGX_EINIT_SPIN_COUNT	20
 #define SGX_EINIT_SLEEP_COUNT	50
@@ -83,58 +83,47 @@
 struct sgx_epc_page {
 	resource_size_t	pa;
 	struct list_head list;
-	struct sgx_encl_page *encl_page;
+	union {
+		struct sgx_encl_page *encl_page;
+		struct sgx_va_page *va_page;
+		struct sgx_page    *xpage;
+	};
 };
 
 enum sgx_alloc_flags {
 	SGX_ALLOC_ATOMIC	= BIT(0),
 };
 
+struct sgx_page {
+	struct sgx_epc_page *epc_page;
+	struct sgx_va_page *va_page;
+	unsigned int va_offset;
+	unsigned int flags;
+};
+
 struct sgx_va_page {
 	struct sgx_epc_page *epc_page;
+	struct sgx_va_page *va_page;
+	unsigned int va_offset;
+	unsigned int flags;
 	DECLARE_BITMAP(slots, SGX_VA_SLOT_COUNT);
 	struct list_head list;
 };
-
-static inline unsigned int sgx_alloc_va_slot(struct sgx_va_page *page)
-{
-	int slot = find_first_zero_bit(page->slots, SGX_VA_SLOT_COUNT);
-
-	if (slot < SGX_VA_SLOT_COUNT)
-		set_bit(slot, page->slots);
-
-	return slot << 3;
-}
-
-static inline void sgx_free_va_slot(struct sgx_va_page *page,
-				    unsigned int offset)
-{
-	clear_bit(offset >> 3, page->slots);
-}
-
-static inline bool sgx_va_slots_empty(struct sgx_va_page *page)
-{
-	int slot = find_first_bit(page->slots, SGX_VA_SLOT_COUNT);
-
-	if (slot == SGX_VA_SLOT_COUNT)
-		return true;
-
-	return false;
-}
 
 enum sgx_encl_page_flags {
 	SGX_ENCL_PAGE_TCS	= BIT(0),
 	SGX_ENCL_PAGE_RESERVED	= BIT(1),
 	SGX_ENCL_PAGE_TRIM	= BIT(2),
 	SGX_ENCL_PAGE_ADDED	= BIT(3),
+	SGX_ENCL_PAGE_VA	= BIT(4),
 };
 
 struct sgx_encl_page {
-	unsigned long addr;
-	unsigned int flags;
 	struct sgx_epc_page *epc_page;
 	struct sgx_va_page *va_page;
 	unsigned int va_offset;
+	unsigned int flags;
+	unsigned long addr;
 };
 
 struct sgx_tgid_ctx {
@@ -185,6 +174,10 @@ struct sgx_epc_bank {
 	unsigned long size;
 };
 
+extern struct mutex sgx_va2_mutex;
+extern struct mutex sgx_tgid_ctx_mutex;
+extern struct list_head sgx_tgid_ctx_list;
+extern atomic_t sgx_va_pages_cnt;
 extern struct workqueue_struct *sgx_add_page_wq;
 extern struct sgx_epc_bank sgx_epc_banks[];
 extern int sgx_nr_epc_banks;
@@ -194,13 +187,13 @@ extern u64 sgx_xfrm_mask;
 extern u32 sgx_misc_reserved;
 extern u32 sgx_xsave_size_tbl[64];
 extern bool sgx_has_sgx2;
-
+extern atomic_t sgx_load_list_nr;
 extern const struct vm_operations_struct sgx_vm_ops;
 
-#define sgx_pr_ratelimited(level, encl, fmt, ...)			  \
-	pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt,	  \
-				     pid_nr((encl)->tgid_ctx->tgid),	  \
-				     (void *)(encl)->base, ##__VA_ARGS__)
+#define sgx_pr_ratelimited(level, encl, fmt, ...) \
+		pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt, \
+					pid_nr((encl)->tgid_ctx->tgid), \
+					(void *)(encl)->base, ##__VA_ARGS__)
 
 #define sgx_dbg(encl, fmt, ...) \
 	sgx_pr_ratelimited(debug, encl, fmt, ##__VA_ARGS__)
@@ -212,6 +205,46 @@ extern const struct vm_operations_struct sgx_vm_ops;
 	sgx_pr_ratelimited(err, encl, fmt, ##__VA_ARGS__)
 #define sgx_crit(encl, fmt, ...) \
 	sgx_pr_ratelimited(crit, encl, fmt, ##__VA_ARGS__)
+
+/*
+ *	A va page has a va page which is a va2 page and a va2 page does not have
+ *	a va page.
+ *	While a regular page has a regular va page which has a va page.
+ *	Tha's the way we can differentiate between the two.
+ */
+#define sgx_is_va(_epage) (_epage->flags & SGX_ENCL_PAGE_VA)
+#define sgx_is_epc_page_va(_epc_page) \
+	(_epc_page->xpage->flags & SGX_ENCL_PAGE_VA)
+#define sgx_set_vapage_index(_va_page, _idx) \
+		(_va_page->flags |= (_idx << 8))
+#define sgx_get_vapage_index(_va_page) \
+		((_va_page->flags & 0xffffff00) >> 8)
+
+static inline unsigned int sgx_alloc_va_slot(struct sgx_va_page *page)
+{
+	int slot = find_first_zero_bit(page->slots, SGX_VA_SLOT_COUNT);
+
+	if (slot < SGX_VA_SLOT_COUNT)
+		set_bit(slot, page->slots);
+
+	return slot << 3;
+}
+
+static inline void sgx_free_va_slot(struct sgx_va_page *page,
+				    unsigned int offset)
+{
+	clear_bit(offset >> 3, page->slots);
+}
+
+static inline bool sgx_va_slots_empty(struct sgx_va_page *page)
+{
+	int slot = find_first_bit(page->slots, SGX_VA_SLOT_COUNT);
+
+	if (slot == SGX_VA_SLOT_COUNT)
+		return true;
+
+	return false;
+}
 
 int sgx_encl_find(struct mm_struct *mm, unsigned long addr,
 		  struct vm_area_struct **vma);
@@ -231,10 +264,9 @@ long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 #endif
 
 /* Utility functions */
-int sgx_test_and_clear_young(struct sgx_encl_page *page, struct sgx_encl *encl);
+int sgx_test_and_clear_young(struct sgx_epc_page *page, struct sgx_encl *encl);
 struct page *sgx_get_backing(struct sgx_encl *encl,
-			     struct sgx_encl_page *entry,
-			     bool pcmd);
+			     struct sgx_page *entry, bool pcmd);
 void sgx_put_backing(struct page *backing, bool write);
 void sgx_insert_pte(struct sgx_encl *encl,
 		    struct sgx_encl_page *encl_page,
@@ -255,25 +287,84 @@ struct sgx_encl_page *sgx_fault_page(struct vm_area_struct *vma,
 				     unsigned int flags,
 				     struct vm_fault *vmf);
 
-
-extern struct mutex sgx_tgid_ctx_mutex;
-extern struct list_head sgx_tgid_ctx_list;
-extern atomic_t sgx_va_pages_cnt;
-
 int sgx_add_epc_bank(resource_size_t start, unsigned long size, int bank);
 int sgx_page_cache_init(void);
 void sgx_page_cache_teardown(void);
 struct sgx_epc_page *sgx_alloc_page(unsigned int flags);
+struct sgx_va_page *sgx_alloc_va_page(struct sgx_epc_page **va_src,
+			unsigned int alloc_flags);
+struct sgx_va_page *sgx_alloc_va2_slot_page(unsigned int *slot,
+			unsigned int alloc_flags);
 void sgx_free_page(struct sgx_epc_page *entry, struct sgx_encl *encl);
 void *sgx_get_page(struct sgx_epc_page *entry);
 void sgx_put_page(void *epc_page_vaddr);
 void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page);
 void sgx_etrack(struct sgx_encl *encl, unsigned int epoch);
 void sgx_ipi_cb(void *info);
-int sgx_eldu(struct sgx_encl *encl, struct sgx_encl_page *encl_page,
+int sgx_eldu(struct sgx_encl *encl, struct sgx_page *encl_page,
 	     struct sgx_epc_page *epc_page, bool is_secs);
 long modify_range(struct sgx_range *rg, unsigned long flags);
 int remove_page(struct sgx_encl *encl, unsigned long address, bool trim);
 int sgx_get_encl(unsigned long addr, struct sgx_encl **encl);
+unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
+
+/* load list accessors */
+#define load_list_insert_epc_page(_epc_page, _encl) \
+	{ \
+		list_add_tail(&(_epc_page)->list, &(_encl)->load_list); \
+		atomic_inc(&sgx_load_list_nr); \
+	}
+#define load_list_return_list(_list, _encl, _nr) \
+	{ \
+		list_splice((_list), &_encl->load_list); \
+		atomic_add(_nr, &sgx_load_list_nr); \
+	}
+#define load_list_init(_encl)		INIT_LIST_HEAD(&_encl->load_list)
+#define load_is_list_empty(_encl)	(list_empty(&_encl->load_list))
+#define load_list_get_first_epc_page(_encl) \
+	list_first_entry(&(_encl)->load_list, struct sgx_epc_page, list)
+#define load_list_extract_epc_page_to_list(_epc_page, _list) \
+	{ \
+		list_move(&_epc_page->list, _list); \
+		atomic_dec(&sgx_load_list_nr); \
+	}
+#define load_list_del_epc_page(_epc_page) \
+	{ \
+		list_del(&_epc_page->list); \
+		atomic_dec(&sgx_load_list_nr); \
+	}
+#define load_list_move_tail(_epc_page, _encl) \
+		list_move_tail(&_epc_page->list, &_encl->load_list)
+
+/* va page list accessors */
+#define va_list_init(_encl)		INIT_LIST_HEAD(&_encl->va_pages)
+#define va_list_is_empty(_encl)	(list_empty(&_encl->va_pages))
+#define va_list_get_first_va_page(_encl) \
+	list_first_entry(&(_encl)->va_pages, struct sgx_va_page, list)
+#define va_list_del_va_page(_va_page) \
+	{ \
+		list_del(&_va_page->list); \
+		atomic_dec(&sgx_va_pages_cnt); \
+		WARN_ON(!_va_page->va_page); \
+		mutex_lock(&sgx_va2_mutex); \
+		sgx_free_va_slot(_va_page->va_page, _va_page->va_offset); \
+		mutex_unlock(&sgx_va2_mutex); \
+	}
+/*
+ *	The 24 msb of va_page->flags are used as a va page index for eviction.
+ *	This index defines the offset of the va page in the backing store
+ */
+#define va_list_insert(_va_page, _encl) \
+	{ \
+		struct sgx_va_page *_p; \
+		unsigned int _i; \
+		if (!va_list_is_empty(_encl)) { \
+			_p = va_list_get_first_va_page(_encl); \
+			_i = sgx_get_vapage_index(_p); \
+			_i++; \
+			sgx_set_vapage_index(_va_page, _i); \
+		} \
+		list_add(&_va_page->list, &_encl->va_pages); \
+	}
 
 #endif /* __ARCH_X86_INTEL_SGX_H__ */
