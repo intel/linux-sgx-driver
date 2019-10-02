@@ -89,6 +89,7 @@ $ make
 You can find the driver *isgx.ko* generated in the same directory.
 
 ### Install the Intel(R) SGX Driver
+
 To install the Intel(R) SGX driver, enter the following command with root privilege:
 ```
 $ sudo mkdir -p "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"    
@@ -105,6 +106,37 @@ On SUSE, need to add '--allow-unsupported' flag when executing 'modprobe' comman
 ```
 $ sudo /sbin/modprobe isgx --allow-unsupported
 ``` 
+
+#### Install the SGX Driver on a UEFI Secure Boot Enableed machine
+If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
+1. Generate the key by using openssl:
+```
+$ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
+```
+
+2. Signing the isgx:
+```
+$ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
+```
+
+3. Check if isgx signed
+```
+$tail $(modinfo -n isgx) | grep "Module signature appended"
+```
+
+4. Register the keys to Secure Boot
+```
+$ sudo mokutil --import MOK.der
+```
+
+5. Reboot and follow the bluescreen to enrol the MOK, it's operated by shimx64.efi and will happens after POSTS but before system boots.[Image References](https://sourceware.org/systemtap/wiki/SecureBoot)
+
+6. Check if MOK key is registered.
+```
+$ sudo mokutil --test-key MOK.der
+```
+
+[Subtitle Step Reference](https://askubuntu.com/questions/760671/could-not-load-vboxdrv-after-upgrade-to-ubuntu-16-04-and-i-want-to-keep-secur/768310#768310)
 
 ### Uninstall the Intel(R) SGX Driver
 Before uninstall the Intel(R) SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
