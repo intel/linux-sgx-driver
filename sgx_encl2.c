@@ -80,7 +80,7 @@ void sgx_free_encl_page(struct sgx_encl_page *encl_page)
 {
 	if (!encl_page)
 		return;
-	if (encl_page->va_offset) {
+	if (encl_page->va_page) {
 		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
 		if (sgx_va_slots_empty(encl_page->va_page))
 			sgx_free_va_page(encl_page->va_page);
