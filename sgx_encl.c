@@ -282,7 +282,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
 
 	epc_page->encl_page = encl_page;
 	encl_page->epc_page = epc_page;
-	sgx_test_and_clear_young(epc_page, encl);
+	sgx_test_and_clear_young(encl_page, encl);
 	load_list_insert_epc_page(epc_page, encl);
 	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 
@@ -323,7 +323,7 @@ retry:
 			loop++;
 			if (loop >= 5) {
 				skip_rest = true;
-				sgx_warn(encl, "alloc_page attempts fail\n");
+				sgx_warn(encl, "alloc_page fails\n");
 			}
 			goto retry;
 		}
@@ -337,7 +337,7 @@ retry:
 		mutex_lock(&encl->lock);
 
 		if (!sgx_process_add_page_req(req, epc_page)) {
-			sgx_free_page(epc_page, encl);
+			sgx_free_page(epc_page);
 			skip_rest = true;
 		}
 
@@ -451,7 +451,7 @@ static const struct mmu_notifier_ops sgx_mmu_notifier_ops = {
 
 int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		  unsigned long addr, unsigned int alloc_flags,
-		  struct sgx_epc_page **va_src, bool already_locked)
+		  bool already_locked)
 {
 	struct sgx_va_page *va_page;
 	unsigned int va_offset = PAGE_SIZE;
@@ -465,7 +465,7 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 	if (va_offset == PAGE_SIZE) {
 		unsigned int slot;
 
-		va_page = sgx_alloc_va_page(va_src, alloc_flags);
+		va_page = sgx_alloc_va_page(alloc_flags);
 		if (!va_page)
 			return -ENOMEM;
 
@@ -474,16 +474,18 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		va_page->va_page = sgx_alloc_va2_slot_page(&slot, alloc_flags);
 		if (!va_page->va_page) {
 			sgx_warn(encl, "va2 page allocation failure\n");
-			sgx_free_page(va_page->epc_page, encl);
+			sgx_free_page(va_page->epc_page);
 			kfree(va_page);
-			return -EFAULT;
+			return -ENOMEM;
 		}
-		load_list_insert_epc_page(va_page->epc_page, encl);
-		va_page->va_offset = slot;
 
 		if (!already_locked)
 			mutex_lock(&encl->lock);
+
+		load_list_insert_epc_page(va_page->epc_page, encl);
+		va_page->va_offset = slot;
 		va_list_insert(va_page, encl);
+
 		if (!already_locked)
 			mutex_unlock(&encl->lock);
 	}
@@ -608,8 +610,8 @@ int sgx_encl_create(struct sgx_secs *secs)
 	if (ret)
 		goto out;
 
-	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size, 0,
-			    NULL, false);
+	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size,
+				0, false);
 	if (ret)
 		goto out;
 
@@ -779,7 +781,7 @@ static int __sgx_encl_add_page(struct sgx_encl *encl,
 			return ret;
 	}
 
-	ret = sgx_init_page(encl, encl_page, addr, 0, NULL, false);
+	ret = sgx_init_page(encl, encl_page, addr, 0, false);
 	if (ret)
 		return ret;
 
@@ -975,7 +977,7 @@ void sgx_encl_release(struct kref *ref)
 		if (entry->epc_page) {
 			load_list_del_epc_page(entry->epc_page);
 			WARN_ON(sgx_is_va(entry));
-			sgx_free_page(entry->epc_page, encl);
+			sgx_free_page(entry->epc_page);
 		}
 		radix_tree_delete(&encl->page_tree, entry->addr >> PAGE_SHIFT);
 		kfree(entry);
@@ -985,14 +987,14 @@ void sgx_encl_release(struct kref *ref)
 		va_page = va_list_get_first_va_page(encl);
 		if (va_page->epc_page) {
 			load_list_del_epc_page(va_page->epc_page);
-			sgx_free_page(va_page->epc_page, encl);
+			sgx_free_page(va_page->epc_page);
 		}
 		va_list_del_va_page(va_page);
 		kfree(va_page);
 	}
 
 	if (encl->secs.epc_page)
-		sgx_free_page(encl->secs.epc_page, encl);
+		sgx_free_page(encl->secs.epc_page);
 
 	if (encl->tgid_ctx)
 		kref_put(&encl->tgid_ctx->refcount, sgx_tgid_ctx_release);

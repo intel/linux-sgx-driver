@@ -63,9 +63,34 @@
 
 #define SGX_NR_MOD_CHUNK_PAGES 16
 
-int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
-		  unsigned long addr, unsigned int alloc_flags,
-		  struct sgx_epc_page **va_src, bool already_locked);
+void sgx_free_va_page(struct sgx_va_page *va_page)
+{
+	if (!va_page)
+		return;
+	if (va_page->epc_page) {
+		load_list_del_epc_page(va_page->epc_page);
+		sgx_free_page(va_page->epc_page);
+		va_page->epc_page = NULL;
+	}
+	va_list_del_va_page(va_page);
+	kfree(va_page);
+}
+
+void sgx_free_encl_page(struct sgx_encl_page *encl_page)
+{
+	if (!encl_page)
+		return;
+	if (encl_page->va_offset) {
+		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
+		if (sgx_va_slots_empty(encl_page->va_page))
+			sgx_free_va_page(encl_page->va_page);
+	}
+
+	if (encl_page->epc_page)
+		sgx_free_page(encl_page->epc_page);
+	kfree(encl_page);
+}
+
 /**
  * sgx_encl_augment() - adds a page to an enclave
  * @addr:	virtual address where the page should be added
@@ -81,7 +106,7 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 				       bool write)
 {
 	struct sgx_pageinfo pginfo;
-	struct sgx_epc_page *epc_page, *va_page = NULL;
+	struct sgx_epc_page *epc_page;
 	struct sgx_epc_page *secs_epc_page = NULL;
 	struct sgx_encl_page *encl_page;
 	struct sgx_encl *encl = (struct sgx_encl *) vma->vm_private_data;
@@ -105,16 +130,9 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 		return ERR_PTR(PTR_ERR(epc_page));
 	}
 
-	va_page = sgx_alloc_page(SGX_ALLOC_ATOMIC);
-	if (IS_ERR(va_page)) {
-		sgx_free_page(epc_page, encl);
-		return ERR_PTR(PTR_ERR(va_page));
-	}
-
 	encl_page = kzalloc(sizeof(struct sgx_encl_page), GFP_KERNEL);
 	if (!encl_page) {
-		sgx_free_page(epc_page, encl);
-		sgx_free_page(va_page, encl);
+		sgx_free_page(epc_page);
 		return ERR_PTR(-EFAULT);
 	}
 
@@ -130,8 +148,7 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 	*/
 
 	/* Start the augmenting process */
-	ret = sgx_init_page(encl, encl_page, addr, SGX_ALLOC_ATOMIC,
-			&va_page, true);
+	ret = sgx_init_page(encl, encl_page, addr, SGX_ALLOC_ATOMIC, true);
 	if (ret)
 		goto out;
 
@@ -188,7 +205,7 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 
 	epc_page->encl_page = encl_page;
 	encl_page->epc_page = epc_page;
-	encl->secs_child_cnt++;
+	epc_page = NULL;
 
 	ret = radix_tree_insert(&encl->page_tree, encl_page->addr >> PAGE_SHIFT,
 			        encl_page);
@@ -196,14 +213,13 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 		pr_err("sgx: radix_tree_insert failed with ret=%d\n", ret);
 		goto out;
 	}
-	sgx_test_and_clear_young(epc_page, encl);
+	sgx_test_and_clear_young(encl_page, encl);
 	load_list_insert_epc_page(encl_page->epc_page, encl);
 	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
+	encl->secs_child_cnt++;
 
-	if (va_page)
-		sgx_free_page(va_page, encl);
 	if (secs_epc_page)
-		sgx_free_page(secs_epc_page, encl);
+		sgx_free_page(secs_epc_page);
 
 	/*
 	 * Write operation corresponds to stack extension
@@ -218,14 +234,11 @@ struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 	return encl_page;
 
 out:
-	if (encl_page->va_offset)
-		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
-	sgx_free_page(epc_page, encl);
-	if (va_page)
-		sgx_free_page(va_page, encl);
-	kfree(encl_page);
+	sgx_free_encl_page(encl_page);
+	if (epc_page)
+		sgx_free_page(epc_page);
 	if (secs_epc_page)
-		sgx_free_page(secs_epc_page, encl);
+		sgx_free_page(secs_epc_page);
 
 	if ((ret == -EBUSY)||(ret == -ERESTARTSYS))
 		return ERR_PTR(ret);
@@ -250,7 +263,8 @@ static int isolate_range(struct sgx_encl *encl,
 		ret = sgx_encl_find(encl->mm, address, &vma);
 		if (ret || encl != vma->vm_private_data) {
 			up_read(&encl->mm->mmap_sem);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto error_exit;
 		}
 
 		encl_page = ERR_PTR(-EBUSY);
@@ -261,9 +275,10 @@ static int isolate_range(struct sgx_encl *encl,
 
 		if (IS_ERR(encl_page)) {
 			up_read(&encl->mm->mmap_sem);
-			sgx_err(encl, "sgx: No page found at address 0x%lx\n",
+			sgx_warn(encl, "sgx: No page found at address 0x%lx\n",
 				 address);
-			return PTR_ERR(encl_page);
+			ret = PTR_ERR(encl_page);
+			goto error_exit;
 		}
 
 		/* We do not need the reserved bit anymore as page
@@ -278,6 +293,9 @@ static int isolate_range(struct sgx_encl *encl,
 
 	up_read(&encl->mm->mmap_sem);
 	return 0;
+
+error_exit:
+	return ret;
 }
 
 static int __modify_range(struct sgx_encl *encl,
@@ -308,6 +326,7 @@ static int __modify_range(struct sgx_encl *encl,
 			ret = -EINVAL;
 			continue;
 		}
+
 		mutex_lock(&encl->lock);
 		epc_va = sgx_get_page(epc_page);
 		status = SGX_LOCKFAIL;
@@ -410,7 +429,6 @@ int remove_page(struct sgx_encl *encl, unsigned long address, bool trim)
 {
 	struct sgx_encl_page *encl_page;
 	struct vm_area_struct *vma;
-	struct sgx_va_page *va_page;
 	int ret;
 
 	ret = sgx_encl_find(encl->mm, address, &vma);
@@ -434,29 +452,16 @@ int remove_page(struct sgx_encl *encl, unsigned long address, bool trim)
 	mutex_lock(&encl->lock);
 
 	radix_tree_delete(&encl->page_tree, encl_page->addr >> PAGE_SHIFT);
-	va_page = encl_page->va_page;
-
-	if (va_page) {
-		sgx_free_va_slot(va_page, encl_page->va_offset);
-
-		if (sgx_va_slots_empty(va_page)) {
-			va_list_del_va_page(va_page);
-			sgx_free_page(va_page->epc_page, encl);
-			kfree(va_page);
-		}
-	}
 
 	if (encl_page->epc_page) {
 		load_list_del_epc_page(encl_page->epc_page);
-		encl_page->epc_page->encl_page = NULL;
 		zap_vma_ptes(vma, encl_page->addr, PAGE_SIZE);
-		sgx_free_page(encl_page->epc_page, encl);
 		encl->secs_child_cnt--;
 	}
 
-	mutex_unlock(&encl->lock);
+	sgx_free_encl_page(encl_page);
 
-	kfree(encl_page);
+	mutex_unlock(&encl->lock);
 
 	return 0;
 }

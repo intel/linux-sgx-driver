@@ -74,7 +74,7 @@
  *	next pages for VA pages
  */
 unsigned long get_backing_pcmd_index(struct sgx_page *entry,
-		struct sgx_encl *encl)
+				struct sgx_encl *encl)
 {
 	struct sgx_encl_page *ep;
 	unsigned long val;
@@ -210,15 +210,15 @@ int sgx_eldu(struct sgx_encl *encl,
 
 		if (IS_ERR(va_epc_page)) {
 			ret = PTR_ERR(va_epc_page);
-			sgx_err(encl, "VA page allocation failure\n");
+			sgx_dbg(encl, "VA page allocation failure\n");
 			goto out;
 		}
 
 		ret = sgx_eldu(encl, (struct sgx_page *)(epage->va_page),
 			va_epc_page, false);
 		if (ret) {
-			sgx_err(encl, "Reload va page failure\n");
-			sgx_free_page(va_epc_page, encl);
+			sgx_dbg(encl, "Reload va page failure\n");
+			sgx_free_page(va_epc_page);
 			goto out;
 		}
 
@@ -232,18 +232,14 @@ int sgx_eldu(struct sgx_encl *encl,
 	backing = sgx_get_backing(encl, epage, false);
 	if (IS_ERR(backing)) {
 		ret = PTR_ERR(backing);
-		sgx_warn(encl,
-			"Pinning the backing page for ELDU failed with %d\n",
-			 ret);
+		sgx_warn(encl, "Pinning backing page failed ret=%d\n", ret);
 		return ret;
 	}
 
 	pcmd = sgx_get_backing(encl, epage, true);
 	if (IS_ERR(pcmd)) {
 		ret = PTR_ERR(pcmd);
-		sgx_warn(encl,
-			"Pinning the pcmd page for EWB failed with %d\n",
-			 ret);
+		sgx_warn(encl, "Pinning pcmd page failed ret=%d\n", ret);
 		goto out;
 	}
 
@@ -335,6 +331,12 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 		goto out;
 	}
 
+	if (entry->va_page->flags & SGX_ENCL_PAGE_RESERVED) {
+		sgx_dbg(encl, "cannot fault, va page is being evicted\n");
+		rc = -EBUSY;
+		goto out;
+	}
+
 	/* Legal race condition, page is already faulted. */
 	if (entry->epc_page) {
 		if (reserve)
@@ -408,14 +410,14 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 	}
 
 	rc = 0;
-	sgx_test_and_clear_young(entry->epc_page, encl);
+	sgx_test_and_clear_young(entry, encl);
 out:
 
 	mutex_unlock(&encl->lock);
 	if (epc_page)
-		sgx_free_page(epc_page, encl);
+		sgx_free_page(epc_page);
 	if (secs_epc_page)
-		sgx_free_page(secs_epc_page, encl);
+		sgx_free_page(secs_epc_page);
 
 	return rc ? ERR_PTR(rc) : entry;
 }

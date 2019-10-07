@@ -192,8 +192,8 @@ extern const struct vm_operations_struct sgx_vm_ops;
 
 #define sgx_pr_ratelimited(level, encl, fmt, ...) \
 		pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt, \
-					pid_nr((encl)->tgid_ctx->tgid), \
-					(void *)(encl)->base, ##__VA_ARGS__)
+				pid_nr((encl)->tgid_ctx->tgid),	\
+				(void *)(encl)->base, ##__VA_ARGS__)
 
 #define sgx_dbg(encl, fmt, ...) \
 	sgx_pr_ratelimited(debug, encl, fmt, ##__VA_ARGS__)
@@ -216,7 +216,7 @@ extern const struct vm_operations_struct sgx_vm_ops;
 #define sgx_is_epc_page_va(_epc_page) \
 	(_epc_page->xpage->flags & SGX_ENCL_PAGE_VA)
 #define sgx_set_vapage_index(_va_page, _idx) \
-		(_va_page->flags |= (_idx << 8))
+		_va_page->flags |= (_idx << 8)
 #define sgx_get_vapage_index(_va_page) \
 		((_va_page->flags & 0xffffff00) >> 8)
 
@@ -264,7 +264,7 @@ long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 #endif
 
 /* Utility functions */
-int sgx_test_and_clear_young(struct sgx_epc_page *page, struct sgx_encl *encl);
+int sgx_test_and_clear_young(struct sgx_encl_page *page, struct sgx_encl *encl);
 struct page *sgx_get_backing(struct sgx_encl *encl,
 			     struct sgx_page *entry, bool pcmd);
 void sgx_put_backing(struct page *backing, bool write);
@@ -287,15 +287,16 @@ struct sgx_encl_page *sgx_fault_page(struct vm_area_struct *vma,
 				     unsigned int flags,
 				     struct vm_fault *vmf);
 
+int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
+	  unsigned long addr, unsigned int alloc_flags, bool already_locked);
 int sgx_add_epc_bank(resource_size_t start, unsigned long size, int bank);
 int sgx_page_cache_init(void);
 void sgx_page_cache_teardown(void);
 struct sgx_epc_page *sgx_alloc_page(unsigned int flags);
-struct sgx_va_page *sgx_alloc_va_page(struct sgx_epc_page **va_src,
-			unsigned int alloc_flags);
+struct sgx_va_page *sgx_alloc_va_page(unsigned int alloc_flags);
 struct sgx_va_page *sgx_alloc_va2_slot_page(unsigned int *slot,
 			unsigned int alloc_flags);
-void sgx_free_page(struct sgx_epc_page *entry, struct sgx_encl *encl);
+void sgx_free_page(struct sgx_epc_page *entry);
 void *sgx_get_page(struct sgx_epc_page *entry);
 void sgx_put_page(void *epc_page_vaddr);
 void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page);
@@ -323,11 +324,11 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 #define load_is_list_empty(_encl)	(list_empty(&_encl->load_list))
 #define load_list_get_first_epc_page(_encl) \
 	list_first_entry(&(_encl)->load_list, struct sgx_epc_page, list)
-#define load_list_extract_epc_page_to_list(_epc_page, _list) \
-	{ \
+ #define load_list_extract_epc_page_to_list(_epc_page, _list) \
+	do { \
 		list_move(&_epc_page->list, _list); \
 		atomic_dec(&sgx_load_list_nr); \
-	}
+	} while (0)
 #define load_list_del_epc_page(_epc_page) \
 	{ \
 		list_del(&_epc_page->list); \
@@ -366,5 +367,28 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 		} \
 		list_add(&_va_page->list, &_encl->va_pages); \
 	}
+
+/* free list accessor */
+#define free_list_insert_epc_page(_epc_page) \
+	{ \
+		spin_lock(&sgx_free_list_lock); \
+		list_add(&_epc_page->list, &sgx_free_list); \
+		sgx_nr_free_pages++; \
+		spin_unlock(&sgx_free_list_lock); \
+	}
+#define free_list_is_empty()	(list_empty(&sgx_free_list))
+#define free_list_extract_first() \
+({ \
+	struct sgx_epc_page *_entry = NULL; \
+	spin_lock(&sgx_free_list_lock); \
+	if (!free_list_is_empty()) { \
+		_entry = list_first_entry(&sgx_free_list, struct sgx_epc_page, \
+					 list); \
+		list_del(&_entry->list); \
+		sgx_nr_free_pages--; \
+	} \
+	spin_unlock(&sgx_free_list_lock); \
+	_entry; \
+})
 
 #endif /* __ARCH_X86_INTEL_SGX_H__ */
