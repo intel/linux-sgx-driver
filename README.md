@@ -108,16 +108,27 @@ $ sudo /sbin/modprobe isgx --allow-unsupported
 ``` 
 
 #### Install the SGX Driver on a UEFI Secure Boot Enableed machine
-If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
-  * Generate the key by using openssl:
-  ```
-  $ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
-   ```
 
-  * Signing the isgx:
-  ```
-  $ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
-  ```
+If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
+   * Generate the key by using openssl
+      ```
+      $ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
+      ```
+
+   * Signing the isgx (Follow the distrubution matches yours):
+   
+      * For signing the isgx.ko on Ubuntu / Debian, please enter following command with root privilege:
+  
+      ```
+      $ sudo /usr/src/linux-headers-$(uname -r)/scripts/sign-file sha256 ./MOK.priv ./MOK.der $(modinfo -n isgx)
+      ```
+
+      * To sign the isgx.ko on Red Hat Enterprise Linux Server or CentOS, need to run below command with root privileges.
+
+      ```
+      $ yum install openssl sign-file perl mokutil keyctl
+      $ perl /usr/src/kernels/$(uname -r)/scripts/sign-file sha256 MOK.priv MOK.der isgx.ko
+      ```
 
   * Check if isgx signed
   ```
@@ -131,15 +142,19 @@ If your machine has UEFI Secure Boot enabled, you may have to follow the followi
 
   * Reboot and follow the bluescreen to enrol the MOK, it's operated by shimx64.efi and will happens after POSTS but before system boots.[Image References](https://sourceware.org/systemtap/wiki/SecureBoot)
 
-  * Check if MOK key is registered.
-  ```
-  $ sudo mokutil --test-key MOK.der
-  ```
-  * Then resume steps before this section. It won't have error when executing `$ sudo /sbin/modprobe isgx`.
+   * Check if MOK key is registered.
+      
+      * For Ubuntu / Debian:
+      ```
+      $ sudo mokutil --test-key MOK.der
+      ```
 
+      * For Red Hat Entereprise Linux / CentOS:
+      ```
+      $ sudo keyctl list %:.system_keyring
+      ```
 
-
-[Subtitle Step Reference](https://askubuntu.com/questions/760671/could-not-load-vboxdrv-after-upgrade-to-ubuntu-16-04-and-i-want-to-keep-secur/768310#768310)
+  * Then resume steps from section 'Install the Intel(R) SGX Driver'.
 
 ### Uninstall the Intel(R) SGX Driver
 Before uninstall the Intel(R) SGX driver, make sure the aesmd service is stopped. See the topic, Start or Stop aesmd Service, on how to stop the aesmd service.  
