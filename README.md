@@ -111,9 +111,14 @@ $ sudo /sbin/modprobe isgx --allow-unsupported
 
 If your machine has UEFI Secure Boot enabled, you may have to follow the following steps to install.
    * Generate the key by using openssl
+
+      For Ubuntu / Debian & Red Hat Enterprise Linux / CentOS:
+
       ```
       $ openssl req -new -x509 -newkey rsa:2048 -keyout MOK.priv -outform DER -out MOK.der -nodes -days 36500 -subj "/CN=isgx Signing/"
       ```
+
+      For SUSE, refer to SUSE official Signing procedure at: [Booting a custom kernel](https://en.opensuse.org/openSUSE:UEFI#Booting_a_custom_kernel)
 
    * Signing the isgx (Follow the distrubution matches yours):
    
@@ -126,7 +131,7 @@ If your machine has UEFI Secure Boot enabled, you may have to follow the followi
       * To sign the isgx.ko on Red Hat Enterprise Linux Server or CentOS, need to run below command with root privileges.
 
       ```
-      $ yum install openssl sign-file perl mokutil keyctl
+      $ yum install openssl perl mokutil
       $ perl /usr/src/kernels/$(uname -r)/scripts/sign-file sha256 MOK.priv MOK.der isgx.ko
       ```
 
