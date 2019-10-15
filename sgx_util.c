@@ -208,6 +208,7 @@ int sgx_eldu(struct sgx_encl *encl,
 		struct sgx_epc_page *va_epc_page =
 			sgx_alloc_page(SGX_ALLOC_ATOMIC);
 
+		WARN_ON(!is_va_evict_enable);
 		if (IS_ERR(va_epc_page)) {
 			ret = PTR_ERR(va_epc_page);
 			sgx_dbg(encl, "VA page allocation failure\n");

@@ -68,7 +68,8 @@ void sgx_free_va_page(struct sgx_va_page *va_page)
 	if (!va_page)
 		return;
 	if (va_page->epc_page) {
-		load_list_del_epc_page(va_page->epc_page);
+		if (is_va_evict_enable)
+			load_list_del_epc_page(va_page->epc_page);
 		sgx_free_page(va_page->epc_page);
 		va_page->epc_page = NULL;
 	}

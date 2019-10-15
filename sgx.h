@@ -190,6 +190,8 @@ extern bool sgx_has_sgx2;
 extern atomic_t sgx_load_list_nr;
 extern const struct vm_operations_struct sgx_vm_ops;
 
+#define is_va_evict_enable true
+
 #define sgx_pr_ratelimited(level, encl, fmt, ...) \
 		pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt, \
 				pid_nr((encl)->tgid_ctx->tgid),	\
@@ -346,10 +348,13 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 	{ \
 		list_del(&_va_page->list); \
 		atomic_dec(&sgx_va_pages_cnt); \
-		WARN_ON(!_va_page->va_page); \
-		mutex_lock(&sgx_va2_mutex); \
-		sgx_free_va_slot(_va_page->va_page, _va_page->va_offset); \
-		mutex_unlock(&sgx_va2_mutex); \
+		if (is_va_evict_enable) { \
+			WARN_ON(!_va_page->va_page); \
+			mutex_lock(&sgx_va2_mutex); \
+			sgx_free_va_slot(_va_page->va_page, \
+				_va_page->va_offset); \
+			mutex_unlock(&sgx_va2_mutex); \
+		} \
 	}
 /*
  *	The 24 msb of va_page->flags are used as a va page index for eviction.
@@ -359,7 +364,7 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 	{ \
 		struct sgx_va_page *_p; \
 		unsigned int _i; \
-		if (!va_list_is_empty(_encl)) { \
+		if (is_va_evict_enable && !va_list_is_empty(_encl)) { \
 			_p = va_list_get_first_va_page(_encl); \
 			_i = sgx_get_vapage_index(_p); \
 			_i++; \

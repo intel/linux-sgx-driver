@@ -498,16 +498,18 @@ void sgx_page_cache_teardown(void)
 		ksgxswapd_tsk = NULL;
 	}
 
-	/* Release va2 list */
-	mutex_lock(&sgx_va2_mutex);
-	while (!list_empty(&sgx_va2_list)) {
-		va2p = list_first_entry(&sgx_va2_list,
-					   struct sgx_va_page, list);
-		list_del(&va2p->list);
-		sgx_free_page(va2p->epc_page);
-		kfree(va2p);
+	if (is_va_evict_enable) {
+		/* Release va2 list */
+		mutex_lock(&sgx_va2_mutex);
+		while (!list_empty(&sgx_va2_list)) {
+			va2p = list_first_entry(&sgx_va2_list,
+						   struct sgx_va_page, list);
+			list_del(&va2p->list);
+			sgx_free_page(va2p->epc_page);
+			kfree(va2p);
+		}
+		mutex_unlock(&sgx_va2_mutex);
 	}
-	mutex_unlock(&sgx_va2_mutex);
 
 	/* Release the free list */
 	spin_lock(&sgx_free_list_lock);
@@ -619,6 +621,8 @@ struct sgx_va_page *sgx_alloc_va2_slot_page(unsigned int *slot,
 {
 	struct sgx_va_page *va2page;
 	unsigned int offset;
+
+	WARN_ON(!is_va_evict_enable);
 
 	*slot = PAGE_SIZE;
 
