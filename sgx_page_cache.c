@@ -91,8 +91,11 @@ static unsigned int sgx_nr_high_pages;
 static struct task_struct *ksgxswapd_tsk;
 static DECLARE_WAIT_QUEUE_HEAD(ksgxswapd_waitq);
 
-static int sgx_test_and_clear_young_cb(pte_t *ptep, pgtable_t token,
-				       unsigned long addr, void *data)
+static int sgx_test_and_clear_young_cb(pte_t *ptep,
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0))
+		pgtable_t token,
+#endif
+		unsigned long addr, void *data)
 {
 	pte_t pte;
 	int ret;
@@ -233,7 +236,7 @@ static void sgx_isolate_pages(struct sgx_encl *encl,
 		 *     cleared
 		 */
 		if (is_va) {
-			if (encl->flags & SGX_ENCL_SECS_EVICTED) {
+			if (sgx_all_slots_evict(encl, entry->va_page)) {
 				load_list_extract_epc_page_to_list(entry, dst);
 				entry->xpage->flags |= SGX_ENCL_PAGE_RESERVED;
 			} else {
@@ -324,6 +327,8 @@ static bool sgx_ewb(struct sgx_encl *encl,
 		return false;
 	}
 
+	sgx_set_evicted(entry);
+
 	return true;
 }
 
@@ -372,9 +377,6 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
 		}
 	}
 
-	/* If va pages are present in the batch there should be only va pages */
-	BUG_ON(nva != 0 && va != 0);
-
 	/* ETRACK - only for non-va batch */
 	if (nva)
 		sgx_etrack(encl, encl->shadow_epoch);
@@ -393,7 +395,7 @@ static void sgx_write_pages(struct sgx_encl *encl, struct list_head *src)
 	 *	This is not a va page batch
 	 */
 	if (!encl->secs_child_cnt &&
-		(encl->flags & SGX_ENCL_INITIALIZED) && !va) {
+		(encl->flags & SGX_ENCL_INITIALIZED) && nva) {
 		sgx_evict_page((struct sgx_page *)&encl->secs, encl);
 		encl->flags |= SGX_ENCL_SECS_EVICTED;
 	}
@@ -498,7 +500,7 @@ void sgx_page_cache_teardown(void)
 		ksgxswapd_tsk = NULL;
 	}
 
-	if (is_va_evict_enable) {
+	if (vaevict) {
 		/* Release va2 list */
 		mutex_lock(&sgx_va2_mutex);
 		while (!list_empty(&sgx_va2_list)) {
@@ -622,7 +624,7 @@ struct sgx_va_page *sgx_alloc_va2_slot_page(unsigned int *slot,
 	struct sgx_va_page *va2page;
 	unsigned int offset;
 
-	WARN_ON(!is_va_evict_enable);
+	WARN_ON(!vaevict);
 
 	*slot = PAGE_SIZE;
 

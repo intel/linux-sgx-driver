@@ -471,7 +471,7 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 
 		va_offset = sgx_alloc_va_slot(va_page);
 
-		if (is_va_evict_enable) {
+		if (vaevict) {
 			va_page->va_page =
 				sgx_alloc_va2_slot_page(&slot, alloc_flags);
 			if (!va_page->va_page) {
@@ -485,7 +485,7 @@ int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		if (!already_locked)
 			mutex_lock(&encl->lock);
 
-		if (is_va_evict_enable)
+		if (vaevict)
 			load_list_insert_epc_page(va_page->epc_page, encl);
 		va_page->va_offset = slot;
 		va_list_insert(va_page, encl);
@@ -844,7 +844,7 @@ static int __sgx_encl_add_page(struct sgx_encl *encl,
 	return 0;
 out:
 	kfree(req);
-	sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
+	sgx_free_va_slot(encl_page->va_page, encl_page->va_offset, false);
 	mutex_unlock(&encl->lock);
 	return ret;
 }
@@ -990,7 +990,7 @@ void sgx_encl_release(struct kref *ref)
 	while (!va_list_is_empty(encl)) {
 		va_page = va_list_get_first_va_page(encl);
 		if (va_page->epc_page) {
-			if (is_va_evict_enable)
+			if (vaevict)
 				load_list_del_epc_page(va_page->epc_page);
 			sgx_free_page(va_page->epc_page);
 		}

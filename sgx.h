@@ -107,6 +107,7 @@ struct sgx_va_page {
 	unsigned int va_offset;
 	unsigned int flags;
 	DECLARE_BITMAP(slots, SGX_VA_SLOT_COUNT);
+	int nr_slot_evicted;
 	struct list_head list;
 };
 
@@ -189,8 +190,7 @@ extern u32 sgx_xsave_size_tbl[64];
 extern bool sgx_has_sgx2;
 extern atomic_t sgx_load_list_nr;
 extern const struct vm_operations_struct sgx_vm_ops;
-
-#define is_va_evict_enable true
+extern int vaevict;
 
 #define sgx_pr_ratelimited(level, encl, fmt, ...) \
 		pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt, \
@@ -218,9 +218,37 @@ extern const struct vm_operations_struct sgx_vm_ops;
 #define sgx_is_epc_page_va(_epc_page) \
 	(_epc_page->xpage->flags & SGX_ENCL_PAGE_VA)
 #define sgx_set_vapage_index(_va_page, _idx) \
-		_va_page->flags |= (_idx << 8)
+		(_va_page->flags |= (_idx << 8))
 #define sgx_get_vapage_index(_va_page) \
 		((_va_page->flags & 0xffffff00) >> 8)
+
+static inline void sgx_set_evicted(struct sgx_page *entry)
+{
+	if (sgx_is_va(entry))
+		return;
+
+	entry->va_page->nr_slot_evicted++;
+}
+
+static inline void sgx_set_reloaded(struct sgx_page *entry)
+{
+	if (sgx_is_va(entry))
+		return;
+
+	entry->va_page->nr_slot_evicted--;
+}
+
+static inline bool sgx_all_slots_evict(struct sgx_encl *encl,
+			struct sgx_va_page *page)
+{
+	/* A VA page has all its slot used for eviction if one
+	 * of the next conditions holds:
+	 * 1. All 512 of its slots are used
+	 * 2. The SECS page was evicted
+	 */
+	return ((page->nr_slot_evicted == SGX_VA_SLOT_COUNT) ||
+		(encl->flags & SGX_ENCL_SECS_EVICTED));
+}
 
 static inline unsigned int sgx_alloc_va_slot(struct sgx_va_page *page)
 {
@@ -233,9 +261,11 @@ static inline unsigned int sgx_alloc_va_slot(struct sgx_va_page *page)
 }
 
 static inline void sgx_free_va_slot(struct sgx_va_page *page,
-				    unsigned int offset)
+				    unsigned int offset, bool evicted)
 {
 	clear_bit(offset >> 3, page->slots);
+	if (evicted)
+		page->nr_slot_evicted--;
 }
 
 static inline bool sgx_va_slots_empty(struct sgx_va_page *page)
@@ -348,11 +378,11 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 	{ \
 		list_del(&_va_page->list); \
 		atomic_dec(&sgx_va_pages_cnt); \
-		if (is_va_evict_enable) { \
+		if (vaevict) { \
 			WARN_ON(!_va_page->va_page); \
 			mutex_lock(&sgx_va2_mutex); \
 			sgx_free_va_slot(_va_page->va_page, \
-				_va_page->va_offset); \
+				_va_page->va_offset, false); \
 			mutex_unlock(&sgx_va2_mutex); \
 		} \
 	}
@@ -364,7 +394,7 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 	{ \
 		struct sgx_va_page *_p; \
 		unsigned int _i; \
-		if (is_va_evict_enable && !va_list_is_empty(_encl)) { \
+		if (vaevict && !va_list_is_empty(_encl)) { \
 			_p = va_list_get_first_va_page(_encl); \
 			_i = sgx_get_vapage_index(_p); \
 			_i++; \

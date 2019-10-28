@@ -98,7 +98,9 @@ u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
 atomic_t sgx_load_list_nr = ATOMIC_INIT(0);
+int vaevict = 1;
 
+module_param(vaevict, int, 0660);
 
 #ifdef CONFIG_COMPAT
 long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)

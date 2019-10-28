@@ -123,5 +123,7 @@ $ sudo /sbin/depmod
 $ sudo /bin/sed -i '/^isgx$/d' /etc/modules
 ```
 ### VA eviction
-VA page eviction is by default enabled by this version of the driver
-It can be disabled by setting the macro definition is_va_eviction_enable to false in file sgx.h
+VA page eviction is by default enabled
+It can be disabled by loading the module and setting parameter vaevict to zero:
+```
+$ sudo insmod isgx.ko vaevict=0

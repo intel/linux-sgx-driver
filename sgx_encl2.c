@@ -68,7 +68,7 @@ void sgx_free_va_page(struct sgx_va_page *va_page)
 	if (!va_page)
 		return;
 	if (va_page->epc_page) {
-		if (is_va_evict_enable)
+		if (vaevict)
 			load_list_del_epc_page(va_page->epc_page);
 		sgx_free_page(va_page->epc_page);
 		va_page->epc_page = NULL;
@@ -82,7 +82,8 @@ void sgx_free_encl_page(struct sgx_encl_page *encl_page)
 	if (!encl_page)
 		return;
 	if (encl_page->va_page) {
-		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset);
+		sgx_free_va_slot(encl_page->va_page, encl_page->va_offset,
+			(encl_page->epc_page == NULL));
 		if (sgx_va_slots_empty(encl_page->va_page))
 			sgx_free_va_page(encl_page->va_page);
 	}

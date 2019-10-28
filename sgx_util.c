@@ -208,7 +208,7 @@ int sgx_eldu(struct sgx_encl *encl,
 		struct sgx_epc_page *va_epc_page =
 			sgx_alloc_page(SGX_ALLOC_ATOMIC);
 
-		WARN_ON(!is_va_evict_enable);
+		WARN_ON(!vaevict);
 		if (IS_ERR(va_epc_page)) {
 			ret = PTR_ERR(va_epc_page);
 			sgx_dbg(encl, "VA page allocation failure\n");
@@ -261,7 +261,8 @@ int sgx_eldu(struct sgx_encl *encl,
 	if (ret) {
 		sgx_err(encl, "ELDU returned %d\n", ret);
 		ret = -EFAULT;
-	}
+	} else
+		sgx_set_reloaded(epage);
 
 	kunmap_atomic((void *)(unsigned long)(pginfo.pcmd - pcmd_offset));
 	kunmap_atomic((void *)(unsigned long)pginfo.srcpge);
