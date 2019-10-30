@@ -44,7 +44,10 @@ Build and Install the Intel(R) SGX Driver
 - Ensure that you have the following required operating systems:  
   * Ubuntu* 16.04.3 LTS Desktop 64bits
   * Ubuntu* 16.04.3 LTS Server 64bits
+  * Ubuntu* 18.04 LTS Desktop 64bits
+  * Ubuntu* 18.04 LTS Server 64bits
   * Red Hat Enterprise Linux Server release 7.4 64bits
+  * Red Hat Enterprise Linux Server release 8.0 64bits
   * CentOS 7.4.1708 64bits
   * SUSE Linux Enterprise Server 12 64bits
 - Ensure that you have the following required hardware:  
@@ -73,6 +76,10 @@ Build and Install the Intel(R) SGX Driver
         ```
         $ sudo yum install kernel
         $ sudo reboot
+        ```
+     * On RHEL 8.0 elfutils-libelf-devel package is required:
+        ```
+        $ sudo yum install elfutils-libelf-devel
         ```
 
 

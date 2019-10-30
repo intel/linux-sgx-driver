@@ -284,6 +284,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
 	encl_page->epc_page = epc_page;
 	sgx_test_and_clear_young(encl_page, encl);
 	list_add_tail(&epc_page->list, &encl->load_list);
+	encl_page->flags |= SGX_ENCL_PAGE_ADDED;
 
 	return true;
 }
@@ -436,8 +437,9 @@ static const struct mmu_notifier_ops sgx_mmu_notifier_ops = {
 	.release	= sgx_mmu_notifier_release,
 };
 
-static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
-			 unsigned long addr, unsigned int alloc_flags)
+int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
+		  unsigned long addr, unsigned int alloc_flags,
+		  struct sgx_epc_page **va_src, bool already_locked)
 {
 	struct sgx_va_page *va_page;
 	struct sgx_epc_page *epc_page = NULL;
@@ -456,10 +458,15 @@ static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		if (!va_page)
 			return -ENOMEM;
 
-		epc_page = sgx_alloc_page(alloc_flags);
-		if (IS_ERR(epc_page)) {
-			kfree(va_page);
-			return PTR_ERR(epc_page);
+		if (va_src) {
+			epc_page = *va_src;
+			*va_src = NULL;
+		} else {
+			epc_page = sgx_alloc_page(alloc_flags);
+			if (IS_ERR(epc_page)) {
+				kfree(va_page);
+				return PTR_ERR(epc_page);
+			}
 		}
 
 		vaddr = sgx_get_page(epc_page);
@@ -486,9 +493,11 @@ static int sgx_init_page(struct sgx_encl *encl, struct sgx_encl_page *entry,
 		va_page->epc_page = epc_page;
 		va_offset = sgx_alloc_va_slot(va_page);
 
-		mutex_lock(&encl->lock);
+		if (!already_locked)
+			mutex_lock(&encl->lock);
 		list_add(&va_page->list, &encl->va_pages);
-		mutex_unlock(&encl->lock);
+		if (!already_locked)
+			mutex_unlock(&encl->lock);
 	}
 
 	entry->va_page = va_page;
@@ -601,7 +610,8 @@ int sgx_encl_create(struct sgx_secs *secs)
 	if (ret)
 		goto out;
 
-	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size, 0);
+	ret = sgx_init_page(encl, &encl->secs, encl->base + encl->size, 0,
+			    NULL, false);
 	if (ret)
 		goto out;
 
@@ -771,7 +781,7 @@ static int __sgx_encl_add_page(struct sgx_encl *encl,
 			return ret;
 	}
 
-	ret = sgx_init_page(encl, encl_page, addr, 0);
+	ret = sgx_init_page(encl, encl_page, addr, 0, NULL, false);
 	if (ret)
 		return ret;
 

@@ -92,8 +92,8 @@ struct sgx_secs {
 	uint32_t mrenclave[8];
 	uint8_t reserved2[SGX_SECS_RESERVED2_SIZE];
 	uint32_t mrsigner[8];
-	uint32_t configid[16];
 	uint8_t	reserved3[SGX_SECS_RESERVED3_SIZE];
+	uint32_t configid[16];
 	uint16_t isvvprodid;
 	uint16_t isvsvn;
 	uint16_t configsvn;
@@ -141,6 +141,7 @@ enum sgx_page_type {
 	SGX_PAGE_TYPE_TCS	= 0x01,
 	SGX_PAGE_TYPE_REG	= 0x02,
 	SGX_PAGE_TYPE_VA	= 0x03,
+	SGX_PAGE_TYPE_TRIM	= 0x04,
 };
 
 enum sgx_secinfo_flags {
@@ -150,6 +151,7 @@ enum sgx_secinfo_flags {
 	SGX_SECINFO_SECS	= (SGX_PAGE_TYPE_SECS << 8),
 	SGX_SECINFO_TCS		= (SGX_PAGE_TYPE_TCS << 8),
 	SGX_SECINFO_REG		= (SGX_PAGE_TYPE_REG << 8),
+	SGX_SECINFO_TRIM	= (SGX_PAGE_TYPE_TRIM << 8),
 };
 
 struct sgx_secinfo {

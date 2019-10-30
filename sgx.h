@@ -69,12 +69,14 @@
 #include <linux/workqueue.h>
 #include <linux/mmu_notifier.h>
 #include <linux/radix-tree.h>
+#include <linux/mm.h>
 #include "sgx_arch.h"
 #include "sgx_user.h"
 
 #define SGX_EINIT_SPIN_COUNT	20
 #define SGX_EINIT_SLEEP_COUNT	50
 #define SGX_EINIT_SLEEP_TIME	20
+#define SGX_EDMM_SPIN_COUNT	20
 
 #define SGX_VA_SLOT_COUNT 512
 
@@ -110,9 +112,21 @@ static inline void sgx_free_va_slot(struct sgx_va_page *page,
 	clear_bit(offset >> 3, page->slots);
 }
 
+static inline bool sgx_va_slots_empty(struct sgx_va_page *page)
+{
+	int slot = find_first_bit(page->slots, SGX_VA_SLOT_COUNT);
+
+	if (slot == SGX_VA_SLOT_COUNT)
+		return true;
+
+	return false;
+}
+
 enum sgx_encl_page_flags {
 	SGX_ENCL_PAGE_TCS	= BIT(0),
 	SGX_ENCL_PAGE_RESERVED	= BIT(1),
+	SGX_ENCL_PAGE_TRIM	= BIT(2),
+	SGX_ENCL_PAGE_ADDED	= BIT(3),
 };
 
 struct sgx_encl_page {
@@ -160,6 +174,7 @@ struct sgx_encl {
 	struct sgx_tgid_ctx *tgid_ctx;
 	struct list_head encl_list;
 	struct mmu_notifier mmu_notifier;
+	unsigned int shadow_epoch;
 };
 
 struct sgx_epc_bank {
@@ -178,6 +193,7 @@ extern u64 sgx_encl_size_max_64;
 extern u64 sgx_xfrm_mask;
 extern u32 sgx_misc_reserved;
 extern u32 sgx_xsave_size_tbl[64];
+extern bool sgx_has_sgx2;
 
 extern const struct vm_operations_struct sgx_vm_ops;
 
@@ -205,6 +221,8 @@ int sgx_encl_add_page(struct sgx_encl *encl, unsigned long addr, void *data,
 		      struct sgx_secinfo *secinfo, unsigned int mrmask);
 int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
 		  struct sgx_einittoken *einittoken);
+struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
+				       unsigned long addr, bool write);
 void sgx_encl_release(struct kref *ref);
 
 long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
@@ -234,7 +252,8 @@ enum sgx_fault_flags {
 
 struct sgx_encl_page *sgx_fault_page(struct vm_area_struct *vma,
 				     unsigned long addr,
-				     unsigned int flags);
+				     unsigned int flags,
+				     struct vm_fault *vmf);
 
 
 extern struct mutex sgx_tgid_ctx_mutex;
@@ -249,6 +268,12 @@ void sgx_free_page(struct sgx_epc_page *entry, struct sgx_encl *encl);
 void *sgx_get_page(struct sgx_epc_page *entry);
 void sgx_put_page(void *epc_page_vaddr);
 void sgx_eblock(struct sgx_encl *encl, struct sgx_epc_page *epc_page);
-void sgx_etrack(struct sgx_encl *encl);
+void sgx_etrack(struct sgx_encl *encl, unsigned int epoch);
+void sgx_ipi_cb(void *info);
+int sgx_eldu(struct sgx_encl *encl, struct sgx_encl_page *encl_page,
+	     struct sgx_epc_page *epc_page, bool is_secs);
+long modify_range(struct sgx_range *rg, unsigned long flags);
+int remove_page(struct sgx_encl *encl, unsigned long address, bool trim);
+int sgx_get_encl(unsigned long addr, struct sgx_encl **encl);
 
 #endif /* __ARCH_X86_INTEL_SGX_H__ */
