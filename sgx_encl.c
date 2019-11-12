@@ -73,6 +73,7 @@
 #include <linux/slab.h>
 #include <linux/hashtable.h>
 #include <linux/shmem_fs.h>
+#include "sgx_pool.h"
 
 struct sgx_add_page_req {
 	struct sgx_encl *encl;

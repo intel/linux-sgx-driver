@@ -122,8 +122,9 @@ $ sudo rm -rf "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
 $ sudo /sbin/depmod
 $ sudo /bin/sed -i '/^isgx$/d' /etc/modules
 ```
-### VA eviction
-VA page eviction is by default enabled
-It can be disabled by loading the module and setting parameter vaevict to zero:
+### VA page eviction
+VA page eviction was introduced in 11/2019. Prior to this date VA pages were not evicted at all. It is done using the following strategy: VA pages of regular pages are inserted into the load list, i.e. the list of EPC resident pages. In order to evict those VA pages, "top level" VA pages are created but those are never evicted.
+VA page eviction is enabled by default but it can be disabled by loading the module and by setting the parameter vaevict to zero:
 ```
 $ sudo insmod isgx.ko vaevict=0
+```

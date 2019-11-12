@@ -73,9 +73,6 @@
 #define SGX_NR_LOW_EPC_PAGES_DEFAULT 32
 #define SGX_NR_SWAP_CLUSTER_MAX	16
 
-static LIST_HEAD(sgx_free_list);
-static DEFINE_SPINLOCK(sgx_free_list_lock);
-
 static LIST_HEAD(sgx_va2_list);
 DEFINE_MUTEX(sgx_va2_mutex);
 
@@ -83,13 +80,14 @@ LIST_HEAD(sgx_tgid_ctx_list);
 DEFINE_MUTEX(sgx_tgid_ctx_mutex);
 atomic_t sgx_va_pages_cnt = ATOMIC_INIT(0);
 static unsigned int sgx_nr_total_epc_pages;
-unsigned int sgx_nr_free_pages;
+atomic_t sgx_nr_free_pages = ATOMIC_INIT(0);
 unsigned int sgx_va2_nr;
 static unsigned int sgx_max_va2;
 static unsigned int sgx_nr_low_pages = SGX_NR_LOW_EPC_PAGES_DEFAULT;
 static unsigned int sgx_nr_high_pages;
 static struct task_struct *ksgxswapd_tsk;
 static DECLARE_WAIT_QUEUE_HEAD(ksgxswapd_waitq);
+static volatile int kswap_sleep;
 
 static int sgx_test_and_clear_young_cb(pte_t *ptep,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0))
@@ -430,17 +428,21 @@ out:
 static int ksgxswapd(void *p)
 {
 	set_freezable();
+	kswap_sleep = 1;
 
 	while (!kthread_should_stop()) {
 		if (try_to_freeze())
 			continue;
 
 		wait_event_freezable(ksgxswapd_waitq,
-				     kthread_should_stop() ||
-				     sgx_nr_free_pages < sgx_nr_high_pages);
+			kthread_should_stop() ||
+			atomic_read(&sgx_nr_free_pages) < sgx_nr_high_pages);
 
-		if (sgx_nr_free_pages < sgx_nr_high_pages)
+		if (atomic_read(&sgx_nr_free_pages) < sgx_nr_high_pages) {
+			kswap_sleep = 0;
 			sgx_swap_pages(SGX_NR_SWAP_CLUSTER_MAX);
+			kswap_sleep = 1;
+		}
 	}
 
 	pr_info("%s: done\n", __func__);
@@ -451,7 +453,6 @@ int sgx_add_epc_bank(resource_size_t start, unsigned long size, int bank)
 {
 	unsigned long i;
 	struct sgx_epc_page *new_epc_page, *entry;
-	struct list_head *parser, *temp;
 
 	for (i = 0; i < size; i += PAGE_SIZE) {
 		new_epc_page = kzalloc(sizeof(*new_epc_page), GFP_KERNEL);
@@ -463,15 +464,12 @@ int sgx_add_epc_bank(resource_size_t start, unsigned long size, int bank)
 		sgx_nr_total_epc_pages++;
 	}
 
-	sgx_max_va2 = sgx_nr_free_pages / SGX_VA_SLOT_COUNT;
+	sgx_max_va2 = atomic_read(&sgx_nr_free_pages) / SGX_VA_SLOT_COUNT;
 
 	return 0;
 err_freelist:
-	list_for_each_safe(parser, temp, &sgx_free_list) {
-		spin_lock(&sgx_free_list_lock);
-		entry = list_entry(parser, struct sgx_epc_page, list);
-		list_del(&entry->list);
-		spin_unlock(&sgx_free_list_lock);
+	while (free_list_is_empty()) {
+		entry = free_list_extract_first();
 		kfree(entry);
 	}
 	return -ENOMEM;
@@ -493,7 +491,6 @@ void sgx_page_cache_teardown(void)
 {
 	struct sgx_epc_page *entry;
 	struct sgx_va_page *va2p;
-	struct list_head *parser, *temp;
 
 	if (ksgxswapd_tsk) {
 		kthread_stop(ksgxswapd_tsk);
@@ -514,14 +511,10 @@ void sgx_page_cache_teardown(void)
 	}
 
 	/* Release the free list */
-	spin_lock(&sgx_free_list_lock);
-	list_for_each_safe(parser, temp, &sgx_free_list) {
-		entry = list_entry(parser, struct sgx_epc_page, list);
-		list_del(&entry->list);
+	while (free_list_is_empty()) {
+		entry = free_list_extract_first();
 		kfree(entry);
 	}
-	spin_unlock(&sgx_free_list_lock);
-
 }
 
 static struct sgx_epc_page *sgx_alloc_page_fast(void)
@@ -569,7 +562,7 @@ struct sgx_epc_page *sgx_alloc_page(unsigned int flags)
 		schedule();
 	}
 
-	if (sgx_nr_free_pages < sgx_nr_low_pages)
+	if (kswap_sleep && atomic_read(&sgx_nr_free_pages) < sgx_nr_low_pages)
 		wake_up(&ksgxswapd_waitq);
 
 	return entry;

@@ -72,6 +72,7 @@
 #include "sgx_arch.h"
 #include "sgx_user.h"
 #include "sgx_asm.h"
+#include "sgx_pool.h"
 
 #define SGX_EINIT_SPIN_COUNT	20
 #define SGX_EINIT_SLEEP_COUNT	50
@@ -191,6 +192,8 @@ extern bool sgx_has_sgx2;
 extern atomic_t sgx_load_list_nr;
 extern const struct vm_operations_struct sgx_vm_ops;
 extern int vaevict;
+extern atomic_t sgx_nr_free_pages;
+
 
 #define sgx_pr_ratelimited(level, encl, fmt, ...) \
 		pr_ ## level ## _ratelimited("intel_sgx: [%d:0x%p] " fmt, \
@@ -404,26 +407,22 @@ unsigned long get_pcmd_offset(struct sgx_page *entry, struct sgx_encl *encl);
 	}
 
 /* free list accessor */
+#define free_list_is_empty() _pool_empty()
 #define free_list_insert_epc_page(_epc_page) \
 	{ \
-		spin_lock(&sgx_free_list_lock); \
-		list_add(&_epc_page->list, &sgx_free_list); \
-		sgx_nr_free_pages++; \
-		spin_unlock(&sgx_free_list_lock); \
+		_pool_push(&_epc_page->list); \
+		atomic_inc(&sgx_nr_free_pages); \
 	}
-#define free_list_is_empty()	(list_empty(&sgx_free_list))
-#define free_list_extract_first() \
-({ \
-	struct sgx_epc_page *_entry = NULL; \
-	spin_lock(&sgx_free_list_lock); \
-	if (!free_list_is_empty()) { \
-		_entry = list_first_entry(&sgx_free_list, struct sgx_epc_page, \
-					 list); \
-		list_del(&_entry->list); \
-		sgx_nr_free_pages--; \
-	} \
-	spin_unlock(&sgx_free_list_lock); \
-	_entry; \
-})
+static inline struct sgx_epc_page *free_list_extract_first(void)
+{
+	struct list_head *ll = _pool_pop();
+	struct sgx_epc_page *entry = NULL;
+
+	if (ll) {
+		atomic_dec(&sgx_nr_free_pages);
+		entry = list_entry(ll, struct sgx_epc_page, list);
+	}
+	return entry;
+}
 
 #endif /* __ARCH_X86_INTEL_SGX_H__ */
