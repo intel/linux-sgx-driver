@@ -1,10 +1,11 @@
 #include <linux/kref.h>
 #include <linux/slab.h>
 #include <linux/list.h>
+#include <linux/types.h>
 
 struct uint128_t {
-	unsigned long lo;
-	unsigned long hi;
+	uint64_t lo;
+	uint64_t hi;
 };
 
 /* This is a simple list with atomic push and pop
@@ -24,6 +25,10 @@ struct atomic_list {
 	};
 } __aligned(16);
 
+/*
+ * Global object with a pointer (top) to first element in list
+ * This a list of free epc pages.
+ */
 volatile struct atomic_list freelist;
 
 /*	the content of src is compared with cmp
@@ -53,18 +58,16 @@ static inline char lock_cmpxchg16b(volatile struct uint128_t *src,
 
 void _pool_push(struct list_head *item)
 {
-	volatile struct atomic_list *al = &freelist;
 	struct atomic_list cmp, next;
 	int ret;
 
 	while (1) {
-		cmp.raw = al->raw;
+		cmp.raw = freelist.raw;
 		next.raw = cmp.raw;
 		next.transact++;
 		next.top = item;
-		item->next = (struct list_head *) al->top;
-		ret = lock_cmpxchg16b((volatile struct uint128_t *)(al),
-			cmp.raw, next.raw);
+		item->next = cmp.top;
+		ret = lock_cmpxchg16b(&freelist.raw, cmp.raw, next.raw);
 		if (ret)
 			return;
 	}
@@ -72,22 +75,20 @@ void _pool_push(struct list_head *item)
 
 struct list_head *_pool_pop(void)
 {
-	volatile struct atomic_list *al = &freelist;
 	struct atomic_list cmp, next;
 	struct list_head *p;
 	int ret;
 
 	while (1) {
-		cmp.raw = al->raw;
-		p = (struct list_head *) cmp.top;
+		cmp.raw = freelist.raw;
+		p = cmp.top;
 		if (!p)
 			return NULL;
 
 		next.raw = cmp.raw;
 		next.transact++;
 		next.top = p->next;
-		ret = lock_cmpxchg16b((volatile struct uint128_t *)(al),
-				cmp.raw, next.raw);
+		ret = lock_cmpxchg16b(&freelist.raw, cmp.raw, next.raw);
 		if (ret)
 			return p;
 	}
@@ -97,6 +98,7 @@ struct list_head *_pool_pop(void)
 
 int _pool_init(void)
 {
+	BUILD_BUG_ON((sizeof(struct atomic_list) != 16));
 	return 0;
 }
 
