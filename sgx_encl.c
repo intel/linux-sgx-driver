@@ -82,6 +82,10 @@ struct sgx_add_page_req {
 	struct list_head list;
 };
 
+unsigned int sgx_encl_created;
+unsigned int sgx_encl_released;
+unsigned long sgx_retired_eadd_cnt;
+
 /**
  * sgx_encl_find - find an enclave
  * @mm:		mm struct of the current process
@@ -136,6 +140,7 @@ static int sgx_add_to_tgid_ctx(struct sgx_encl *encl)
 	if (ctx) {
 		if (kref_get_unless_zero(&ctx->refcount)) {
 			encl->tgid_ctx = ctx;
+			encl->id = sgx_encl_created++;
 			mutex_unlock(&sgx_tgid_ctx_mutex);
 			put_pid(tgid);
 			return 0;
@@ -158,6 +163,7 @@ static int sgx_add_to_tgid_ctx(struct sgx_encl *encl)
 	list_add(&ctx->list, &sgx_tgid_ctx_list);
 
 	encl->tgid_ctx = ctx;
+	encl->id = sgx_encl_created++;
 
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 	return 0;
@@ -271,6 +277,7 @@ static bool sgx_process_add_page_req(struct sgx_add_page_req *req,
 		return false;
 	}
 
+	encl->eadd_cnt++;
 	encl->secs_child_cnt++;
 
 	ret = sgx_measure(encl->secs.epc_page, epc_page, req->mrmask);
@@ -655,6 +662,7 @@ int sgx_encl_create(struct sgx_secs *secs)
 	up_read(&current->mm->mmap_sem);
 
 	mutex_lock(&sgx_tgid_ctx_mutex);
+	list_add_tail(&encl->all_list, &sgx_all_encl_list);
 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 
@@ -955,8 +963,11 @@ void sgx_encl_release(struct kref *ref)
 	void **slot;
 
 	mutex_lock(&sgx_tgid_ctx_mutex);
+	sgx_encl_released++;
+	sgx_retired_eadd_cnt += encl->eadd_cnt;
 	if (!list_empty(&encl->encl_list))
 		list_del(&encl->encl_list);
+	list_del(&encl->all_list);
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 
 	if (encl->mmu_notifier.ops)
@@ -995,3 +1006,35 @@ void sgx_encl_release(struct kref *ref)
 
 	kfree(encl);
 }
+
+#ifdef CONFIG_PROC_FS
+void *sgx_encl_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	mutex_lock(&sgx_tgid_ctx_mutex);
+
+	return seq_list_start(&sgx_all_encl_list, *pos);
+}
+
+void *sgx_encl_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	return seq_list_next(v, &sgx_all_encl_list, pos);
+}
+
+void sgx_encl_seq_stop(struct seq_file *seq, void *v)
+{
+	mutex_unlock(&sgx_tgid_ctx_mutex);
+}
+
+int sgx_encl_seq_show(struct seq_file *file, void *v)
+{
+	struct sgx_encl *encl= list_entry(v, struct sgx_encl, all_list);
+
+	seq_printf(file, "%d %u %lu %lu %u\n",
+		   pid_nr(encl->tgid_ctx->tgid),
+		   encl->id,
+		   encl->size,
+		   encl->eadd_cnt,
+		   encl->secs_child_cnt);
+	return(0);
+}
+#endif

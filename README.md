@@ -112,3 +112,29 @@ $ sudo rm -rf "/lib/modules/"`uname -r`"/kernel/drivers/intel/sgx"
 $ sudo /sbin/depmod
 $ sudo /bin/sed -i '/^isgx$/d' /etc/modules
 ```
+
+Statistics and Monitoring
+-------------------------
+
+Usage statistics are available in /proc/sgx_enclaves and /proc/sgx_stats.
+sgx_enclaves provides a list of all of the enclaves currently configured
+on the system.  sgx_stats provides statistics about system usage.
+
+sgx_enclaves columns, in order:
+* pid/tgid of controlling process
+* ID of enclave (these are monotonically increasing)
+* max size of enclave from SECS
+* pages added to the enclave (not necessarily resident)
+* pages resident
+
+sgx_stats columns, in order:
+* number of enclaves created
+* number of enclaves removed (column 1 - column 2 is the number of
+  enclaves running)
+* total pages added to by removed enclaves (current info available
+  from sgx_enclaves)
+* total pages swapped into enclaves (including adds)
+* total pages swapped out/removed of enclaves
+* total size of enclave in 4K pages
+* number of pages used for va swap space
+* number of pages free (column 6 - column 7 - column 8 is pages in use)
