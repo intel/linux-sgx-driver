@@ -88,9 +88,9 @@ MODULE_VERSION(DRV_VERSION);
 #ifndef X86_FEATURE_SGX
 	#define X86_FEATURE_SGX (9 * 32 + 2)
 #endif
-
+#ifndef FEAT_CTL_SGX_ENABLED
 #define FEAT_CTL_SGX_ENABLED                      (1<<18)
-
+#endif
 /*
  * Global data.
  */
