@@ -17,6 +17,7 @@ default:
 
 install: default
 	$(MAKE) INSTALL_MOD_DIR=kernel/drivers/intel/sgx -C $(KDIR) M=$(PWD) modules_install
+	depmod -A
 	sh -c "cat /etc/modules | grep -Fxq isgx || echo isgx >> /etc/modules"
 
 endif
