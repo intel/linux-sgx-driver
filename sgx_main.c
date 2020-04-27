@@ -148,6 +148,9 @@ static unsigned long sgx_get_unmapped_area(struct file *file,
 		return -EINVAL;
 #endif
 
+	if (flags & MAP_FIXED)
+		return addr;
+
 	addr = current->mm->get_unmapped_area(file, addr, 2 * len, pgoff,
 					      flags);
 	if (IS_ERR_VALUE(addr))
