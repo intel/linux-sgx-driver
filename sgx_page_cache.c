@@ -88,7 +88,13 @@ static DECLARE_WAIT_QUEUE_HEAD(ksgxswapd_waitq);
 
 static int sgx_test_and_clear_young_cb(pte_t *ptep,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 3, 0))
-		pgtable_t token,
+    #if( defined(RHEL_RELEASE_VERSION) && defined(RHEL_RELEASE_CODE))
+        #if (RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(8, 1))
+                                       pgtable_t token,
+        #endif
+    #else
+                                       pgtable_t token,
+    #endif
 #endif
 		unsigned long addr, void *data)
 {

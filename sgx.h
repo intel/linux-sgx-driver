@@ -275,5 +275,5 @@ int sgx_eldu(struct sgx_encl *encl, struct sgx_encl_page *encl_page,
 long modify_range(struct sgx_range *rg, unsigned long flags);
 int remove_page(struct sgx_encl *encl, unsigned long address, bool trim);
 int sgx_get_encl(unsigned long addr, struct sgx_encl **encl);
-
+int sgx_vm_insert_pfn(struct vm_area_struct *vma, unsigned long addr,  resource_size_t pa);
 #endif /* __ARCH_X86_INTEL_SGX_H__ */
