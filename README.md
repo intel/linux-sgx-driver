@@ -13,11 +13,11 @@ The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts 
 
 IMPORTANT:
 ---------
-This driver supports SGX 2.0 features, and works with latest Intel(R) SGX PSW on CPUs without Flexible Launch Control (FLC). 
-As upstreaming patches for kernel currently does not support SGX 2.0 features, and will not support non-FLC CPUs, this driver is diverged and will remain diverged from the proposed upstreaming version.
+This driver can be used to support earlier SGX-capable CPUs without Flexible Launch Control (FLC). However, please note that the ABI of this driver is diverged from the upstreaming SGX kernel patches and extra effort may be required to migrate software using this driver to future kernels with SGX support.  To minimize ABI divergence and better align all SGX software stack with future SGX enabled kernel, no new features will be added to this driver. Support for distro/kernel versions other than those listed here will be considered on a case-by-case basis. 
 
-The [DCAP driver](https://github.com/intel/SGXDataCenterAttestationPrimitives/tree/master/driver)
-will track more closely with upstream in-kernel support.
+The [DCAP driver]( https://github.com/intel/SGXDataCenterAttestationPrimitives/tree/master/driver) has been developed to track closely with the upstreaming kernel patches, and support all SGX CPUs with FLC. Therefore, we recommend SGX community to start using the DCAP driver to minimize future impact from adopting new mainline kernels with SGX support.
+
+For new feature requests/patches, please submit them directly to the [linux-sgx mailing list](http://vger.kernel.org/vger-lists.html#linux-sgx)
 
 License
 -------
