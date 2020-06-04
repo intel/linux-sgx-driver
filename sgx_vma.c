@@ -105,17 +105,33 @@ static void sgx_vma_close(struct vm_area_struct *vma)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,1,0))
 static unsigned int sgx_vma_fault(struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+    struct vm_area_struct *vma = vmf->vma;
+#else
+    #if( defined(RHEL_RELEASE_VERSION) && defined(RHEL_RELEASE_CODE))
+        #if (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(8, 1))
+static unsigned int sgx_vma_fault(struct vm_fault *vmf)
+{
+    struct vm_area_struct *vma = vmf->vma;
+        #elif (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8, 0))
 static int sgx_vma_fault(struct vm_fault *vmf)
 {
-	struct vm_area_struct *vma = vmf->vma;
-#else
+    struct vm_area_struct *vma = vmf->vma;
+        #else // 7.x
 static int sgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 {
+        #endif
+    #else
+        #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0))
+static int sgx_vma_fault(struct vm_fault *vmf)
+{
+    struct vm_area_struct *vma = vmf->vma;
+        #else
+static int sgx_vma_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+        #endif
+    #endif
 #endif
-	
-	
+
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,10,0))
 	unsigned long addr = (unsigned long)vmf->address;
 #else

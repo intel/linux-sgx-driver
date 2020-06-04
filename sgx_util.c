@@ -66,6 +66,31 @@
 #else
 	#include <linux/mm.h>
 #endif
+int sgx_vm_insert_pfn(struct vm_area_struct *vma, unsigned long addr, resource_size_t pa)
+{
+	int rc;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0))
+        rc = vmf_insert_pfn(vma, addr, PFN_DOWN(pa));
+#else
+    #if( defined(RHEL_RELEASE_VERSION) && defined(RHEL_RELEASE_CODE))
+        #if (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(8, 1))
+            rc = vmf_insert_pfn(vma, addr, PFN_DOWN(pa));
+        #else //8.1 or below
+            rc = vm_insert_pfn(vma, addr, PFN_DOWN(pa));
+            if (!rc){
+                rc = VM_FAULT_NOPAGE;
+            }
+        #endif
+    #else
+        rc = vm_insert_pfn(vma, addr, PFN_DOWN(pa));
+        if (!rc){
+                rc = VM_FAULT_NOPAGE;
+        }
+    #endif
+#endif
+        return rc;
+}
 
 struct page *sgx_get_backing(struct sgx_encl *encl,
 			     struct sgx_encl_page *entry,
@@ -318,14 +343,9 @@ static struct sgx_encl_page *sgx_do_fault(struct vm_area_struct *vma,
 	/* Do not free */
 	epc_page = NULL;
 	list_add_tail(&entry->epc_page->list, &encl->load_list);
+	rc = sgx_vm_insert_pfn(vma, entry->addr, entry->epc_page->pa);
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0))
-	rc = vmf_insert_pfn(vma, entry->addr, PFN_DOWN(entry->epc_page->pa));
-	if (rc != VM_FAULT_NOPAGE) {
-#else
-	rc = vm_insert_pfn(vma, entry->addr, PFN_DOWN(entry->epc_page->pa));
-	if (rc) {
-#endif
+        if (rc != VM_FAULT_NOPAGE) {
 		/* Kill the enclave if vm_insert_pfn fails; failure only occurs
 		 * if there is a driver bug or an unrecoverable issue, e.g. OOM.
 		 */
