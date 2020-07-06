@@ -78,11 +78,18 @@ int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	int ret;
+	struct rw_semaphore *sem;
 
 	if (addr & (PAGE_SIZE - 1))
 		return -EINVAL;
 
-	down_read(&mm->mmap_sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	sem = &mm->mmap_lock;
+#else
+	sem = &mm->mmap_sem;
+#endif
+
+	down_read(sem);
 
 	ret = sgx_encl_find(mm, addr, &vma);
 	if (!ret) {
@@ -94,7 +101,7 @@ int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 			kref_get(&(*encl)->refcount);
 	}
 
-	up_read(&mm->mmap_sem);
+	up_read(sem);
 	return ret;
 }
 

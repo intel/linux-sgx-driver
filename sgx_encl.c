@@ -291,6 +291,7 @@ static void sgx_add_page_worker(struct work_struct *work)
 	struct sgx_epc_page *epc_page;
 	bool skip_rest = false;
 	bool is_empty = false;
+	struct rw_semaphore *sem;
 
 	encl = container_of(work, struct sgx_encl, add_page_work);
 
@@ -316,7 +317,13 @@ static void sgx_add_page_worker(struct work_struct *work)
 			goto next;
 		}
 
-		down_read(&encl->mm->mmap_sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+		sem = &encl->mm->mmap_lock;
+#else
+		sem = &encl->mm->mmap_sem;
+#endif
+
+		down_read(sem);
 		mutex_lock(&encl->lock);
 
 		if (!sgx_process_add_page_req(req, epc_page)) {
@@ -325,7 +332,7 @@ static void sgx_add_page_worker(struct work_struct *work)
 		}
 
 		mutex_unlock(&encl->lock);
-		up_read(&encl->mm->mmap_sem);
+		up_read(sem);
 
 next:
 		kfree(req);
@@ -586,6 +593,7 @@ int sgx_encl_create(struct sgx_secs *secs)
 	struct sgx_encl *encl;
 	struct sgx_epc_page *secs_epc;
 	struct vm_area_struct *vma;
+	struct rw_semaphore *sem;
 	void *secs_vaddr;
 	long ret;
 
@@ -639,12 +647,18 @@ int sgx_encl_create(struct sgx_secs *secs)
 		goto out;
 	}
 
-	down_read(&current->mm->mmap_sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	sem = &current->mm->mmap_lock;
+#else
+	sem = &current->mm->mmap_sem;
+#endif
+
+	down_read(sem);
 	ret = sgx_encl_find(current->mm, secs->base, &vma);
 	if (ret != -ENOENT) {
 		if (!ret)
 			ret = -EINVAL;
-		up_read(&current->mm->mmap_sem);
+		up_read(sem);
 		goto out;
 	}
 
@@ -652,12 +666,12 @@ int sgx_encl_create(struct sgx_secs *secs)
 	    vma->vm_end != (secs->base + secs->size)
 	    /* vma->vm_pgoff != 0 */) {
 		ret = -EINVAL;
-		up_read(&current->mm->mmap_sem);
+		up_read(sem);
 		goto out;
 	}
 
 	vma->vm_private_data = encl;
-	up_read(&current->mm->mmap_sem);
+	up_read(sem);
 
 	mutex_lock(&sgx_tgid_ctx_mutex);
 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);

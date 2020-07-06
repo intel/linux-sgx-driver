@@ -1,4 +1,4 @@
-/*
+ /*
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
  *
@@ -367,6 +367,7 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 	struct sgx_tgid_ctx *ctx;
 	struct sgx_encl *encl;
 	LIST_HEAD(cluster);
+	struct rw_semaphore *sem;
 
 	ctx = sgx_isolate_tgid_ctx(nr_to_scan);
 	if (!ctx)
@@ -376,10 +377,16 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 	if (!encl)
 		goto out;
 
-	down_read(&encl->mm->mmap_sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	sem = &encl->mm->mmap_lock;
+#else
+	sem = &encl->mm->mmap_sem;
+#endif
+
+	down_read(sem);
 	sgx_isolate_pages(encl, &cluster, nr_to_scan);
 	sgx_write_pages(encl, &cluster);
-	up_read(&encl->mm->mmap_sem);
+	up_read(sem);
 
 	kref_put(&encl->refcount, sgx_encl_release);
 out:
