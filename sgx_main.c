@@ -268,7 +268,7 @@ static int sgx_dev_init(struct device *parent)
 	if (!sgx_add_page_wq) {
 		pr_err("intel_sgx: alloc_workqueue() failed\n");
 		ret = -ENOMEM;
-		goto out_iounmap;
+		goto out_page_cache;
 	}
 
 	sgx_dev.parent = parent;
@@ -281,6 +281,8 @@ static int sgx_dev_init(struct device *parent)
 	return 0;
 out_workqueue:
 	destroy_workqueue(sgx_add_page_wq);
+out_page_cache:
+	sgx_page_cache_teardown();
 out_iounmap:
 #ifdef CONFIG_X86_64
 	for (i = 0; i < sgx_nr_epc_banks; i++)
