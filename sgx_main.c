@@ -278,9 +278,6 @@ static int sgx_dev_init(struct device *parent)
 		goto out_workqueue;
 	}
 
-	if (ret)
-		goto out_workqueue;
-
 	return 0;
 out_workqueue:
 	destroy_workqueue(sgx_add_page_wq);
