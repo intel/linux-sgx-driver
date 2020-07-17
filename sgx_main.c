@@ -106,13 +106,6 @@ u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
 
-#ifdef CONFIG_COMPAT
-long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
-{
-	return sgx_ioctl(filep, cmd, arg);
-}
-#endif
-
 static int sgx_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	vma->vm_ops = &sgx_vm_ops;
@@ -162,7 +155,7 @@ static const struct file_operations sgx_fops = {
 	.owner			= THIS_MODULE,
 	.unlocked_ioctl		= sgx_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl		= sgx_compat_ioctl,
+	.compat_ioctl		= sgx_ioctl,
 #endif
 	.mmap			= sgx_mmap,
 	.get_unmapped_area	= sgx_get_unmapped_area,
