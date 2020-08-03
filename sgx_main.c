@@ -106,13 +106,6 @@ u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
 
-#ifdef CONFIG_COMPAT
-long sgx_compat_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
-{
-	return sgx_ioctl(filep, cmd, arg);
-}
-#endif
-
 static int sgx_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	vma->vm_ops = &sgx_vm_ops;
@@ -162,7 +155,7 @@ static const struct file_operations sgx_fops = {
 	.owner			= THIS_MODULE,
 	.unlocked_ioctl		= sgx_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl		= sgx_compat_ioctl,
+	.compat_ioctl		= sgx_ioctl,
 #endif
 	.mmap			= sgx_mmap,
 	.get_unmapped_area	= sgx_get_unmapped_area,
@@ -268,7 +261,7 @@ static int sgx_dev_init(struct device *parent)
 	if (!sgx_add_page_wq) {
 		pr_err("intel_sgx: alloc_workqueue() failed\n");
 		ret = -ENOMEM;
-		goto out_iounmap;
+		goto out_page_cache;
 	}
 
 	sgx_dev.parent = parent;
@@ -278,12 +271,11 @@ static int sgx_dev_init(struct device *parent)
 		goto out_workqueue;
 	}
 
-	if (ret)
-		goto out_workqueue;
-
 	return 0;
 out_workqueue:
 	destroy_workqueue(sgx_add_page_wq);
+out_page_cache:
+	sgx_page_cache_teardown();
 out_iounmap:
 #ifdef CONFIG_X86_64
 	for (i = 0; i < sgx_nr_epc_banks; i++)
