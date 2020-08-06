@@ -339,7 +339,7 @@ static u32 sgx_calc_ssaframesize(u32 miscselect, u64 xfrm)
 	int i;
 
 	for (i = 2; i < 64; i++) {
-		if (!((1 << i) & xfrm))
+		if (!((1UL << i) & xfrm))
 			continue;
 
 		size = SGX_SSA_GPRS_SIZE + sgx_xsave_size_tbl[i];
