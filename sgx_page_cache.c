@@ -367,7 +367,6 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 	struct sgx_tgid_ctx *ctx;
 	struct sgx_encl *encl;
 	LIST_HEAD(cluster);
-	struct rw_semaphore *sem;
 
 	ctx = sgx_isolate_tgid_ctx(nr_to_scan);
 	if (!ctx)
@@ -378,15 +377,18 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 		goto out;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
-	sem = &encl->mm->mmap_lock;
+	mmap_read_lock(encl->mm);
 #else
-	sem = &encl->mm->mmap_sem;
+	down_read(&encl->mm->mmap_sem);
 #endif
 
-	down_read(sem);
 	sgx_isolate_pages(encl, &cluster, nr_to_scan);
 	sgx_write_pages(encl, &cluster);
-	up_read(sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(encl->mm);
+#else
+	up_read(&encl->mm->mmap_sem);
+#endif
 
 	kref_put(&encl->refcount, sgx_encl_release);
 out:

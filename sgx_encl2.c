@@ -230,24 +230,26 @@ static int isolate_range(struct sgx_encl *encl,
 	unsigned long address, end;
 	struct sgx_encl_page *encl_page;
 	struct vm_area_struct *vma;
-	struct rw_semaphore *sem;
 	int ret;
 
 	address = rg->start_addr;
 	end = address + rg->nr_pages * PAGE_SIZE;
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
-	sem = &encl->mm->mmap_lock;
+	mmap_read_lock(encl->mm);
 #else
-	sem = &encl->mm->mmap_sem;
+	down_read(&encl->mm->mmap_sem);
 #endif
 
-	down_read(sem);
 
 	for (; address < end; address += PAGE_SIZE) {
 		ret = sgx_encl_find(encl->mm, address, &vma);
 		if (ret || encl != vma->vm_private_data) {
-			up_read(sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+			mmap_read_unlock(encl->mm);
+#else
+			up_read(&encl->mm->mmap_sem);
+#endif
 			return -EINVAL;
 		}
 
@@ -258,7 +260,11 @@ static int isolate_range(struct sgx_encl *encl,
 						   SGX_FAULT_RESERVE, NULL);
 
 		if (IS_ERR(encl_page)) {
-			up_read(sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+			mmap_read_unlock(encl->mm);
+#else
+			up_read(&encl->mm->mmap_sem);
+#endif
 			sgx_err(encl, "sgx: No page found at address 0x%lx\n",
 				 address);
 			return PTR_ERR(encl_page);
@@ -272,8 +278,11 @@ static int isolate_range(struct sgx_encl *encl,
 		encl_page->flags &= ~SGX_ENCL_PAGE_RESERVED;
 		mutex_unlock(&encl->lock);
 	}
-
-	up_read(sem);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(encl->mm);
+#else
+	up_read(&encl->mm->mmap_sem);
+#endif
 	return 0;
 }
 
