@@ -332,7 +332,7 @@ static void sgx_add_page_worker(struct work_struct *work)
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
 		mmap_read_unlock(encl->mm);
 #else
- 		up_read(&encl->mm->mmap_sem);
+		up_read(&encl->mm->mmap_sem);
 #endif
 
 next:
