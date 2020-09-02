@@ -82,7 +82,11 @@ int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 	if (addr & (PAGE_SIZE - 1))
 		return -EINVAL;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_lock(mm);
+#else
 	down_read(&mm->mmap_sem);
+#endif
 
 	ret = sgx_encl_find(mm, addr, &vma);
 	if (!ret) {
@@ -94,7 +98,12 @@ int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 			kref_get(&(*encl)->refcount);
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(mm);
+#else
 	up_read(&mm->mmap_sem);
+#endif
+
 	return ret;
 }
 

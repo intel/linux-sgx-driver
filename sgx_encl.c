@@ -316,7 +316,11 @@ static void sgx_add_page_worker(struct work_struct *work)
 			goto next;
 		}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+		mmap_read_lock(encl->mm);
+#else
 		down_read(&encl->mm->mmap_sem);
+#endif
 		mutex_lock(&encl->lock);
 
 		if (!sgx_process_add_page_req(req, epc_page)) {
@@ -325,7 +329,11 @@ static void sgx_add_page_worker(struct work_struct *work)
 		}
 
 		mutex_unlock(&encl->lock);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+		mmap_read_unlock(encl->mm);
+#else
 		up_read(&encl->mm->mmap_sem);
+#endif
 
 next:
 		kfree(req);
@@ -639,31 +647,45 @@ int sgx_encl_create(struct sgx_secs *secs)
 		goto out;
 	}
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_lock(current->mm);
+#else
 	down_read(&current->mm->mmap_sem);
+#endif
 	ret = sgx_encl_find(current->mm, secs->base, &vma);
 	if (ret != -ENOENT) {
 		if (!ret)
 			ret = -EINVAL;
-		up_read(&current->mm->mmap_sem);
-		goto out;
+		goto out_locked;
 	}
 
 	if (vma->vm_start != secs->base ||
 	    vma->vm_end != (secs->base + secs->size)
 	    /* vma->vm_pgoff != 0 */) {
 		ret = -EINVAL;
-		up_read(&current->mm->mmap_sem);
-		goto out;
+		goto out_locked;
 	}
 
 	vma->vm_private_data = encl;
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(current->mm);
+#else
 	up_read(&current->mm->mmap_sem);
+#endif
 
 	mutex_lock(&sgx_tgid_ctx_mutex);
 	list_add_tail(&encl->encl_list, &encl->tgid_ctx->encl_list);
 	mutex_unlock(&sgx_tgid_ctx_mutex);
 
 	return 0;
+out_locked:
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(current->mm);
+#else
+	up_read(&current->mm->mmap_sem);
+#endif
+
 out:
 	if (encl)
 		kref_put(&encl->refcount, sgx_encl_release);

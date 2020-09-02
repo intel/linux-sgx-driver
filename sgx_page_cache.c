@@ -376,10 +376,19 @@ static void sgx_swap_pages(unsigned long nr_to_scan)
 	if (!encl)
 		goto out;
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_lock(encl->mm);
+#else
 	down_read(&encl->mm->mmap_sem);
+#endif
+
 	sgx_isolate_pages(encl, &cluster, nr_to_scan);
 	sgx_write_pages(encl, &cluster);
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 8, 0))
+	mmap_read_unlock(encl->mm);
+#else
 	up_read(&encl->mm->mmap_sem);
+#endif
 
 	kref_put(&encl->refcount, sgx_encl_release);
 out:
