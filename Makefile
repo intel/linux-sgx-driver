@@ -23,4 +23,4 @@ install: default
 endif
 
 clean:
-	rm -vrf *.o *.ko *.order *.symvers *.mod.c .tmp_versions .*o.cmd
+	rm -vrf *.o *.ko *.order *.symvers *.mod.c .tmp_versions .*o.cmd *.mod

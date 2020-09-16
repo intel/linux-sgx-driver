@@ -184,6 +184,15 @@ static int sgx_pm_suspend(struct device *dev)
 	return 0;
 }
 
+static void sgx_reset_pubkey_hash(void *failed)
+{
+	if (wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH0, 0xa6053e051270b7acULL) ||
+		wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH1, 0x6cfbe8ba8b3b413dULL) ||
+		wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH2, 0xc4916d99f2b3735dULL) ||
+		wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH3, 0xd4f8c05909f9bb3bULL))
+		*(int *)failed = -EIO;
+}
+
 static SIMPLE_DEV_PM_OPS(sgx_drv_pm, sgx_pm_suspend, NULL);
 
 static int sgx_dev_init(struct device *parent)
@@ -193,6 +202,7 @@ static int sgx_dev_init(struct device *parent)
 	unsigned long size;
 	int ret;
 	int i;
+	int msr_reset_failed = 0;
 
 	pr_info("intel_sgx: " DRV_DESCRIPTION " v" DRV_VERSION "\n");
 
@@ -269,6 +279,11 @@ static int sgx_dev_init(struct device *parent)
 	if (ret) {
 		pr_err("intel_sgx: misc_register() failed\n");
 		goto out_workqueue;
+	}
+
+	on_each_cpu(sgx_reset_pubkey_hash, &msr_reset_failed, 1);
+	if (msr_reset_failed) {
+		pr_info("intel_sgx:  can not reset SGX LE public key hash MSRs\n");
 	}
 
 	return 0;
