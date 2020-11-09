@@ -32,15 +32,7 @@ Build and Install the Intel(R) SGX Driver
 -----------------------------------------
 
 ### Prerequisites
-- Ensure that you have the following required operating systems:  
-  * Ubuntu* 16.04.3 LTS Desktop 64bits
-  * Ubuntu* 16.04.3 LTS Server 64bits
-  * Ubuntu* 18.04 LTS Desktop 64bits
-  * Ubuntu* 18.04 LTS Server 64bits
-  * Red Hat Enterprise Linux Server release 7.4 64bits
-  * Red Hat Enterprise Linux Server release 8.0 64bits
-  * CentOS 7.4.1708 64bits
-  * SUSE Linux Enterprise Server 12 64bits
+- Ensure that you have an operating system version supported as listed in releases: https://01.org/intel-software-guard-extensions/downloads  
 - Ensure that you have the following required hardware:  
   * 6th Generation Intel(R) Core(TM) Processor or newer
 - Configure the system with the **SGX hardware enabled** option.
@@ -54,7 +46,7 @@ Build and Install the Intel(R) SGX Driver
         ```
         $ sudo apt-get install linux-headers-$(uname -r)
         ```
-  * On CentOS and RHEL
+  * On CentOS, RHEL or Fedora
      * To check if matching kernel headers are installed:
         ```
         $ ls /usr/src/kernels/$(uname -r)
