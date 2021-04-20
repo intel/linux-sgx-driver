@@ -313,7 +313,8 @@ static int sgx_drv_probe(struct platform_device *pdev)
 	if (boot_cpu_data.x86_vendor != X86_VENDOR_INTEL)
 		return -ENODEV;
 
-	if (!boot_cpu_has(X86_FEATURE_SGX)) {
+	cpuid(7, &eax, &ebx, &ecx, &edx);
+	if(!((ebx >> 2) & 0x1)){
 		pr_err("intel_sgx: the CPU is missing SGX\n");
 		return -ENODEV;
 	}
