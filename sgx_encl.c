@@ -930,7 +930,7 @@ int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
 		  struct sgx_einittoken *token, bool use_flc)
 {
 	int ret;
-	int tmp;
+	int wrmsr_fail;
 	int i;
 	int j;
 
@@ -945,22 +945,27 @@ int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
 
 	for (i = 0; i < SGX_EINIT_SLEEP_COUNT; i++) {
 		for (j = 0; j < SGX_EINIT_SPIN_COUNT; j++) {
+			wrmsr_fail = 0;
+
 			preempt_disable();
 
 			if (use_flc) {
-				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH0, ((u64*)token->payload.mrsigner)[0]);
-				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH1, ((u64*)token->payload.mrsigner)[1]);
-				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH2, ((u64*)token->payload.mrsigner)[2]);
-				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH3, ((u64*)token->payload.mrsigner)[3]);
+				wrmsr_fail |= wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH0, ((u64*)token->payload.mrsigner)[0]);
+				wrmsr_fail |= wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH1, ((u64*)token->payload.mrsigner)[1]);
+				wrmsr_fail |= wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH2, ((u64*)token->payload.mrsigner)[2]);
+				wrmsr_fail |= wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH3, ((u64*)token->payload.mrsigner)[3]);
 			}
 
 			ret = sgx_einit(encl, sigstruct, token);
 
 			if (use_flc) {
-				sgx_reset_pubkey_hash(&tmp);
+				sgx_reset_pubkey_hash(&wrmsr_fail);
 			}
 
 			preempt_enable();
+
+			if (wrmsr_fail)
+				sgx_dbg(encl, "WRMSR SGXLEPUBKEYHASH failed\n");
 
 			if (ret == SGX_UNMASKED_EVENT)
 				continue;
