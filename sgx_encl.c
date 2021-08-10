@@ -916,6 +916,7 @@ static int sgx_einit(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
  * @encl:	an enclave
  * @sigstruct:	SIGSTRUCT for the enclave
  * @token:	EINITTOKEN for the enclave
+ * @use_flc:  write LEHASH MSRs prior to calling EINIT, and restore them after
  *
  * Retries a few times in order to perform EINIT operation on an enclave
  * because there could be potentially an interrupt storm.
@@ -926,9 +927,10 @@ static int sgx_einit(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
  * SGX error code
  */
 int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
-		  struct sgx_einittoken *token)
+		  struct sgx_einittoken *token, bool use_flc)
 {
 	int ret;
+	int tmp;
 	int i;
 	int j;
 
@@ -943,7 +945,22 @@ int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
 
 	for (i = 0; i < SGX_EINIT_SLEEP_COUNT; i++) {
 		for (j = 0; j < SGX_EINIT_SPIN_COUNT; j++) {
+			preempt_disable();
+
+			if (use_flc) {
+				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH0, ((u64*)token->payload.mrsigner)[0]);
+				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH1, ((u64*)token->payload.mrsigner)[1]);
+				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH2, ((u64*)token->payload.mrsigner)[2]);
+				wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH3, ((u64*)token->payload.mrsigner)[3]);
+			}
+
 			ret = sgx_einit(encl, sigstruct, token);
+
+			if (use_flc) {
+				sgx_reset_pubkey_hash(&tmp);
+			}
+
+			preempt_enable();
 
 			if (ret == SGX_UNMASKED_EVENT)
 				continue;
