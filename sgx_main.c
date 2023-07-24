@@ -109,8 +109,8 @@ bool sgx_has_sgx2;
 static int sgx_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	vma->vm_ops = &sgx_vm_ops;
-	vma->vm_flags |= VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO |
-			 VM_DONTCOPY;
+	vm_flags_set(vma, VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO |
+                    VM_DONTCOPY);
 
 	return 0;
 }
