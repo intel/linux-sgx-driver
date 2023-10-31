@@ -9,7 +9,7 @@ Intel(R) Software Guard Extensions (Intel(R) SGX) is an Intel technology for app
 
 The Linux SGX software stack is comprised of the Intel(R) SGX driver, the Intel(R) SGX SDK, and the Intel(R) SGX Platform Software. The Intel(R) SGX SDK and Intel(R) SGX PSW are hosted in the [linux-sgx](https://github.com/01org/linux-sgx) project.
 
-The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which will was used until the driver upstreaming process was complete. 
+The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which was used until the driver upstreaming process was complete. 
 
 IMPORTANT:
 ---------
