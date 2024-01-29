@@ -25,14 +25,14 @@ See License.txt for details.
 
 Documentation
 -------------
-- [Intel(R) SGX for Linux\* OS](https://01.org/intel-softwareguard-extensions) project home page on [01.org](http://01.org)
+- [Intel(R) SGX for Linux\* OS](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html)
 - [Intel(R) SGX Programming Reference](https://software.intel.com/en-us/articles/intel-sdm)
 
 Build and Install the Intel(R) SGX Driver
 -----------------------------------------
 
 ### Prerequisites
-- Ensure that you have an operating system version supported as listed in releases: https://01.org/intel-software-guard-extensions/downloads  
+- Ensure that you have an operating system version supported as listed for specific releases: [https://01.org/intel-software-guard-extensions/downloads](https://www.intel.com/content/www/us/en/developer/tools/software-guard-extensions/linux-overview.html#downloads)  
 - Ensure that you have the following required hardware:  
   * 6th Generation Intel(R) Core(TM) Processor or newer
 - Configure the system with the **SGX hardware enabled** option.
