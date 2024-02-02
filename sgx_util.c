@@ -183,7 +183,7 @@ int sgx_eldu(struct sgx_encl *encl,
 	void *va_ptr;
 	int ret;
 
-	pcmd_offset = ((encl_page->addr >> PAGE_SHIFT) & 31) * 128;
+	pcmd_offset = ((encl_page->addr >> PAGE_SHIFT) & 31) << 7;
 
 	backing = sgx_get_backing(encl, encl_page, false);
 	if (IS_ERR(backing)) {
