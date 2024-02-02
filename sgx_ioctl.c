@@ -72,6 +72,7 @@
 #include <linux/slab.h>
 #include <linux/hashtable.h>
 #include <linux/shmem_fs.h>
+#include <crypto/hash.h>
 
 int sgx_get_encl(unsigned long addr, struct sgx_encl **encl)
 {
@@ -202,6 +203,31 @@ out:
 	return ret;
 }
 
+static int __sgx_get_key_hash(struct crypto_shash *tfm, const void *modulus,
+			      void *hash)
+{
+	SHASH_DESC_ON_STACK(shash, tfm);
+
+	shash->tfm = tfm;
+
+	return crypto_shash_digest(shash, modulus, SGX_MODULUS_SIZE, hash);
+}
+
+static int sgx_get_key_hash(const void *modulus, void *hash)
+{
+	struct crypto_shash *tfm;
+	int ret;
+
+	tfm = crypto_alloc_shash("sha256", 0, CRYPTO_ALG_ASYNC);
+	if (IS_ERR(tfm))
+		return PTR_ERR(tfm);
+
+	ret = __sgx_get_key_hash(tfm, modulus, hash);
+
+	crypto_free_shash(tfm);
+	return ret;
+}
+
 /**
  * sgx_ioc_enclave_init - handler for %SGX_IOC_ENCLAVE_INIT
  *
@@ -218,15 +244,27 @@ out:
 static long sgx_ioc_enclave_init(struct file *filep, unsigned int cmd,
 				 unsigned long arg)
 {
-	struct sgx_enclave_init *initp = (struct sgx_enclave_init *)arg;
-	unsigned long sigstructp = (unsigned long)initp->sigstruct;
-	unsigned long einittokenp = (unsigned long)initp->einittoken;
-	unsigned long encl_id = initp->addr;
+	unsigned long sigstructp;
+	unsigned long einittokenp;
+	unsigned long encl_id;
+	struct sgx_enclave_init *initp;
+	struct sgx_enclave_init_no_token *initntp;
 	struct sgx_sigstruct *sigstruct;
 	struct sgx_einittoken *einittoken;
 	struct sgx_encl *encl;
 	struct page *initp_page;
 	int ret;
+
+	if (cmd == SGX_IOC_ENCLAVE_INIT_NO_TOKEN) {
+		initntp = (struct sgx_enclave_init_no_token *)arg;
+		sigstructp = (unsigned long)initntp->sigstruct;
+		encl_id = initntp->addr;
+	} else {
+		initp = (struct sgx_enclave_init *)arg;
+		sigstructp = (unsigned long)initp->sigstruct;
+		einittokenp = (unsigned long)initp->einittoken;
+		encl_id = initp->addr;
+	}
 
 	initp_page = alloc_page(GFP_HIGHUSER);
 	if (!initp_page)
@@ -241,16 +279,22 @@ static long sgx_ioc_enclave_init(struct file *filep, unsigned int cmd,
 	if (ret)
 		goto out;
 
-	ret = copy_from_user(einittoken, (void __user *)einittokenp,
-			     sizeof(*einittoken));
-	if (ret)
-		goto out;
+	if (cmd != SGX_IOC_ENCLAVE_INIT_NO_TOKEN) {
+		ret = copy_from_user(einittoken, (void __user *)einittokenp,
+					 sizeof(*einittoken));
+		if (ret)
+			goto out;
+	} else {
+		ret = sgx_get_key_hash(sigstruct->modulus, einittoken->payload.mrsigner);
+		if (ret)
+			goto out;
+	}
 
 	ret = sgx_get_encl(encl_id, &encl);
 	if (ret)
 		goto out;
 
-	ret = sgx_encl_init(encl, sigstruct, einittoken);
+	ret = sgx_encl_init(encl, sigstruct, einittoken, cmd == SGX_IOC_ENCLAVE_INIT_NO_TOKEN);
 
 	kref_put(&encl->refcount, sgx_encl_release);
 
@@ -394,6 +438,7 @@ long sgx_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		handler = sgx_ioc_enclave_add_page;
 		break;
 	case SGX_IOC_ENCLAVE_INIT:
+	case SGX_IOC_ENCLAVE_INIT_NO_TOKEN:
 		handler = sgx_ioc_enclave_init;
 		break;
 	case SGX_IOC_ENCLAVE_EMODPR:

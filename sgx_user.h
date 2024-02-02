@@ -69,6 +69,8 @@
 	_IOW(SGX_MAGIC, 0x01, struct sgx_enclave_add_page)
 #define SGX_IOC_ENCLAVE_INIT \
 	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init)
+#define SGX_IOC_ENCLAVE_INIT_NO_TOKEN \
+	_IOW(SGX_MAGIC, 0x02, struct sgx_enclave_init_no_token)
 #define SGX_IOC_ENCLAVE_EMODPR \
 	_IOW(SGX_MAGIC, 0x09, struct sgx_modification_param)
 #define SGX_IOC_ENCLAVE_MKTCS \
@@ -145,6 +147,17 @@ struct sgx_enclave_init {
 	__u64	addr;
 	__u64	sigstruct;
 	__u64	einittoken;
+} __attribute__((__packed__));
+
+/**
+ * struct sgx_enclave_init - parameter structure for the
+ *                           %SGX_IOC_ENCLAVE_INIT ioctl
+ * @addr:	address in the ELRANGE
+ * @sigstruct:	address for the page data
+ */
+struct sgx_enclave_init_no_token {
+	__u64	addr;
+	__u64	sigstruct;
 } __attribute__((__packed__));
 
 /*
