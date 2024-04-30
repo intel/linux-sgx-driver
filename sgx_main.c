@@ -109,9 +109,8 @@ bool sgx_has_sgx2;
 static int sgx_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	vma->vm_ops = &sgx_vm_ops;
-	vma->vm_flags |= VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO |
-			 VM_DONTCOPY;
-
+	vm_flags_set(vma, VM_PFNMAP | VM_DONTEXPAND | VM_DONTDUMP | VM_IO |
+                    VM_DONTCOPY);
 	return 0;
 }
 
@@ -221,7 +220,7 @@ static int sgx_dev_init(struct device *parent)
 
 		for (i = 2; i < 64; i++) {
 			cpuid_count(0x0D, i, &eax, &ebx, &ecx, &edx);
-			if ((1 << i) & sgx_xfrm_mask)
+			if ((1ULL << i) & sgx_xfrm_mask)
 				sgx_xsave_size_tbl[i] = eax + ebx;
 		}
 	}
