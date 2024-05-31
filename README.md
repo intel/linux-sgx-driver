@@ -9,13 +9,11 @@ Intel(R) Software Guard Extensions (Intel(R) SGX) is an Intel technology for app
 
 The Linux SGX software stack is comprised of the Intel(R) SGX driver, the Intel(R) SGX SDK, and the Intel(R) SGX Platform Software. The Intel(R) SGX SDK and Intel(R) SGX PSW are hosted in the [linux-sgx](https://github.com/01org/linux-sgx) project.
 
-The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which will be used until the driver upstreaming process is complete. 
+The [linux-sgx-driver](https://github.com/01org/linux-sgx-driver) project hosts the out-of-tree driver for the Linux Intel(R) SGX software stack, which was used until the driver upstreaming process was complete. 
 
 IMPORTANT:
 ---------
-This driver can be used to support earlier SGX-capable CPUs without Flexible Launch Control (FLC). However, please note that the ABI of this driver is diverged from the upstreaming SGX kernel patches and extra effort may be required to migrate software using this driver to future kernels with SGX support.  To minimize ABI divergence and better align all SGX software stack with future SGX enabled kernel, no new features will be added to this driver. Support for distro/kernel versions other than those listed here will be considered on a case-by-case basis. 
-
-The [DCAP driver]( https://github.com/intel/SGXDataCenterAttestationPrimitives/tree/master/driver) has been developed to track closely with the upstreaming kernel patches, and support all SGX CPUs with FLC. Therefore, we recommend SGX community to start using the DCAP driver to minimize future impact from adopting new mainline kernels with SGX support.
+This driver is deprecated and no longer maintained by Intel. We recommend the SGX community to use the SGX driver that was upstreamed into the Linux kernel. If that is not possible you may still use the [DCAP driver](https://github.com/intel/SGXDataCenterAttestationPrimitives/tree/master/driver) that tracks closely the upstreamed kernel driver. Note that both kernel and DCAP drivers require SGX CPUs with Flexible Launch Control (FLC) support.
 
 For new feature requests/patches, please submit them directly to the [linux-sgx mailing list](http://vger.kernel.org/vger-lists.html#linux-sgx)
 
