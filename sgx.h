@@ -246,7 +246,6 @@ void sgx_insert_pte(struct sgx_encl *encl,
 		    struct sgx_encl_page *encl_page,
 		    struct sgx_epc_page *epc_page,
 		    struct vm_area_struct *vma);
-int sgx_eremove(struct sgx_epc_page *epc_page);
 void sgx_zap_tcs_ptes(struct sgx_encl *encl,
 		      struct vm_area_struct *vma);
 void sgx_invalidate(struct sgx_encl *encl, bool flush_cpus);
