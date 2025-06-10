@@ -138,8 +138,8 @@ struct sgx_enclave_add_page {
  * struct sgx_enclave_init - parameter structure for the
  *                           %SGX_IOC_ENCLAVE_INIT ioctl
  * @addr:	address in the ELRANGE
- * @sigstruct:	address for the page data
- * @einittoken:	EINITTOKEN
+ * @sigstruct:	address for the SIGSTRUCT data
+ * @einittoken:	address for the EINITTOKEN data
  */
 struct sgx_enclave_init {
 	__u64	addr;
