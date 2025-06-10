@@ -226,7 +226,7 @@ int sgx_encl_create(struct sgx_secs *secs);
 int sgx_encl_add_page(struct sgx_encl *encl, unsigned long addr, void *data,
 		      struct sgx_secinfo *secinfo, unsigned int mrmask);
 int sgx_encl_init(struct sgx_encl *encl, struct sgx_sigstruct *sigstruct,
-		  struct sgx_einittoken *einittoken);
+		  struct sgx_einittoken *einittoken, bool use_flc);
 struct sgx_encl_page *sgx_encl_augment(struct vm_area_struct *vma,
 				       unsigned long addr, bool write);
 void sgx_encl_release(struct kref *ref);
@@ -282,4 +282,6 @@ long modify_range(struct sgx_range *rg, unsigned long flags);
 int remove_page(struct sgx_encl *encl, unsigned long address, bool trim);
 int sgx_get_encl(unsigned long addr, struct sgx_encl **encl);
 int sgx_vm_insert_pfn(struct vm_area_struct *vma, unsigned long addr,  resource_size_t pa);
+
+void sgx_reset_pubkey_hash(void *failed);
 #endif /* __ARCH_X86_INTEL_SGX_H__ */

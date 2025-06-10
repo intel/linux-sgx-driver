@@ -105,6 +105,7 @@ u64 sgx_xfrm_mask = 0x3;
 u32 sgx_misc_reserved;
 u32 sgx_xsave_size_tbl[64];
 bool sgx_has_sgx2;
+bool sgx_dev_alt_name;
 
 static int sgx_mmap(struct file *file, struct vm_area_struct *vma)
 {
@@ -168,6 +169,13 @@ static struct miscdevice sgx_dev = {
 	.mode   = 0666,
 };
 
+static struct miscdevice sgx_dev_alt = {
+ .minor	= MISC_DYNAMIC_MINOR,
+	.name	= "sgx",
+	.fops	= &sgx_fops,
+	.mode   = 0666,
+};
+
 static int sgx_pm_suspend(struct device *dev)
 {
 	struct sgx_tgid_ctx *ctx;
@@ -184,7 +192,7 @@ static int sgx_pm_suspend(struct device *dev)
 	return 0;
 }
 
-static void sgx_reset_pubkey_hash(void *failed)
+void sgx_reset_pubkey_hash(void *failed)
 {
 	if (wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH0, 0xa6053e051270b7acULL) ||
 		wrmsrl_safe(MSR_IA32_SGXLEPUBKEYHASH1, 0x6cfbe8ba8b3b413dULL) ||
@@ -275,7 +283,7 @@ static int sgx_dev_init(struct device *parent)
 	}
 
 	sgx_dev.parent = parent;
-	ret = misc_register(&sgx_dev);
+	ret = misc_register(sgx_dev_alt_name ? &sgx_dev_alt : &sgx_dev);
 	if (ret) {
 		pr_err("intel_sgx: misc_register() failed\n");
 		goto out_workqueue;
@@ -408,3 +416,6 @@ module_init(init_sgx_module);
 module_exit(cleanup_sgx_module);
 
 MODULE_LICENSE("Dual BSD/GPL");
+
+module_param_named(devsgx, sgx_dev_alt_name, bool, 0444);
+MODULE_PARM_DESC(sgx_dev_alt_name, "Device name is sgx instead of isgx");
